@@ -2,7 +2,9 @@
 //! one [`Account`] method per MCP tool ([`ops`]). Knows nothing of HTTP
 //! serving, the MCP or the database.
 
+mod compact;
 mod error;
+mod ids;
 pub mod oauth;
 pub(crate) mod ops;
 mod rest;
