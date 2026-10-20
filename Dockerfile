@@ -12,10 +12,12 @@ FROM rust:1.99-bookworm AS chef
 RUN cargo install cargo-chef --locked
 WORKDIR /app
 
+# `crates/` holds every workspace member: `server` (binary spotify-mcp) and
+# `spotify` (the Web API client). Copy the whole directory so the recipe and
+# the build always see all of them.
 FROM chef AS planner
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY crates crates
-COPY migrations migrations
 RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
@@ -23,8 +25,9 @@ COPY --from=planner /app/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY crates crates
+# sqlx::migrate! embeds these at compile time.
 COPY migrations migrations
-RUN cargo build --release --locked --bin telegram-mcp
+RUN cargo build --release --locked --bin spotify-mcp
 
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update \
@@ -32,11 +35,11 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 --home-dir /app --shell /usr/sbin/nologin app
 WORKDIR /app
-COPY --from=builder /app/target/release/telegram-mcp /usr/local/bin/telegram-mcp
+COPY --from=builder /app/target/release/spotify-mcp /usr/local/bin/spotify-mcp
 COPY --from=web /web/dist /app/web
 ENV WEB_DIST=/app/web BIND_ADDR=0.0.0.0:8080
 USER app
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD curl -fsS http://127.0.0.1:8080/healthz || exit 1
-CMD ["telegram-mcp"]
+CMD ["spotify-mcp"]

@@ -1,6 +1,10 @@
+# Build context for the Dockerfile: Cargo files, crates/, migrations/ and web/.
 target
 .env
+.env.*
+!.env.example
 .git
+.github
 web/node_modules
 web/dist
 docker-compose*.yml

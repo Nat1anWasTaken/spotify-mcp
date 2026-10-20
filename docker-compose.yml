@@ -4,12 +4,11 @@ services:
   app:
     build: .
     restart: unless-stopped
-    # Shutdown drains in-flight requests (e.g. wait_for_message, up to 60 s)
-    # before flushing Telegram sessions.
-    stop_grace_period: 60s
+    # Lets in-flight tool calls finish and get logged on shutdown.
+    stop_grace_period: 30s
     env_file: .env
     environment:
-      DATABASE_URL: postgres://telegram_mcp:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/telegram_mcp
+      DATABASE_URL: postgres://spotify_mcp:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/spotify_mcp
     depends_on:
       postgres:
         condition: service_healthy
@@ -23,13 +22,13 @@ services:
     image: postgres:17
     restart: unless-stopped
     environment:
-      POSTGRES_USER: telegram_mcp
+      POSTGRES_USER: spotify_mcp
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
-      POSTGRES_DB: telegram_mcp
+      POSTGRES_DB: spotify_mcp
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U telegram_mcp -d telegram_mcp"]
+      test: ["CMD-SHELL", "pg_isready -U spotify_mcp -d spotify_mcp"]
       interval: 10s
       timeout: 5s
       retries: 5
