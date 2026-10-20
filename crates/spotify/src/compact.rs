@@ -328,20 +328,6 @@ pub(crate) fn user(value: &Value) -> Value {
     ])
 }
 
-pub(crate) fn category(value: &Value) -> Value {
-    object([
-        ("id", value["id"].clone()),
-        ("name", value["name"].clone()),
-        (
-            "image",
-            value["icons"]
-                .as_array()
-                .and_then(|i| i.first())
-                .map_or(Value::Null, |i| i["url"].clone()),
-        ),
-    ])
-}
-
 pub(crate) fn device(value: &Value) -> Value {
     object([
         ("id", value["id"].clone()),
@@ -429,6 +415,7 @@ pub(crate) fn now_playing(state: &Value) -> Value {
             "album": album,
             "image": image,
             "duration": duration(item["duration_ms"].as_u64().unwrap_or(0)),
+            "duration_ms": item["duration_ms"].as_u64().unwrap_or(0),
         })
     } else {
         Value::Null
@@ -436,6 +423,7 @@ pub(crate) fn now_playing(state: &Value) -> Value {
     json!({
         "is_playing": state["is_playing"].as_bool().unwrap_or(false),
         "progress": state["progress_ms"].as_u64().map(duration),
+        "progress_ms": state["progress_ms"].as_u64(),
         "device": if device.is_object() {
             json!({
                 "name": device["name"],
@@ -559,11 +547,12 @@ mod tests {
         assert_eq!(
             now_playing(&state),
             json!({
-                "is_playing": true, "progress": "1:01",
+                "is_playing": true, "progress": "1:01", "progress_ms": 61_000,
                 "device": {"name": "Mac", "type": "Computer", "volume_percent": 40},
                 "item": {"uri": "spotify:track:t1", "name": "Song",
                          "artists": [{"name": "A", "uri": "spotify:artist:a"}],
-                         "album": "Al", "image": "big", "duration": "3:35"}
+                         "album": "Al", "image": "big", "duration": "3:35",
+                         "duration_ms": 215_000}
             })
         );
     }

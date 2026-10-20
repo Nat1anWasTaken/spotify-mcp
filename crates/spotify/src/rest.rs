@@ -81,13 +81,16 @@ impl Account {
             .iter()
             .filter_map(|(k, v)| v.as_deref().map(|v| (*k, v)))
             .collect();
+        let is_get = method == Method::GET;
         let mut request = inner
             .http
             .request(method, url)
             .bearer_auth(&*self.token)
             .query(&query);
         request = match body {
-            Body::None => request,
+            // Spotify answers 411 to a body-less PUT/POST without a length.
+            Body::None if is_get => request,
+            Body::None => request.header(header::CONTENT_LENGTH, "0"),
             Body::Json(json) => request.json(&json),
             Body::Jpeg(base64) => request
                 .header(header::CONTENT_TYPE, "image/jpeg")

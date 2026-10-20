@@ -2518,8 +2518,10 @@ dependencies = [
 name = "spotify"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "base64 0.22.1",
  "chrono",
+ "futures",
  "rand 0.9.5",
  "reqwest",
  "schemars",
