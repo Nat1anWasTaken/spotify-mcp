@@ -57,8 +57,10 @@ crates/server    axum app (binary `spotify-mcp`)
    If the user is signed in to the dashboard as a different Spotify user, the
    old session is replaced, since Spotify said who they are. Failures redirect
    to `/login?error=<code>`: `denied` (the user declined), `expired` (the
-   attempt is gone or the cookie doesn't match) or `spotify` (an upstream
-   failure).
+   attempt is gone or the cookie doesn't match), `not_allowed` (Spotify
+   answers `/me` with 403: a development-mode app serves only the up to 5
+   users on its allowlist in the Spotify developer dashboard) or `spotify`
+   (any other upstream failure).
 
 ## Tokens and renewal (`links.rs`)
 
@@ -74,8 +76,12 @@ crates/server    axum app (binary `spotify-mcp`)
   agent is told to have the user sign in again. A 401 from the Web API
   before expiry triggers one forced `links::refresh` and a single retry of
   the call.
-- There is no background renewal: Spotify refresh tokens don't expire on a
-  schedule, so refreshing on demand is enough.
+- There is no background renewal; refreshing on demand is enough. But since
+  2026-06-18 Spotify refresh tokens expire 6 months after the user's
+  original authorization, and refreshing does not extend that. So
+  `spotify_links.authorized_at` records each sign-in, and `LinkStatus`
+  exposes `reauthorize_by` = `authorized_at` + 6 months. The dashboard warns
+  in the last 14 days. After that, `invalid_grant` → `needs_relink` as usual.
 
 ## Tool calls
 
@@ -325,7 +331,8 @@ type User = {
   display_name: string | null
   email: string | null
   avatar_url: string | null
-  product: string | null   // "premium" | "free" | ...
+  product: string | null   // "premium" | "free" | ...; usually null: development-mode
+                           // apps no longer get email, country or product from /me
   country: string | null
 }
 
@@ -337,6 +344,8 @@ type LinkStatus = {
   expires_at: string | null
   last_ok_at: string | null
   last_error: string | null
+  authorized_at: string | null   // last Spotify sign-in
+  reauthorize_by: string | null  // authorized_at + 6 months: the refresh token's hard expiry
 }
 
 type AgentSession = {
@@ -357,6 +366,7 @@ type ToolInfo = {
   title: string
   description: string
   kind: "read" | "write"
+  destructive: boolean            // write that removes or replaces something
   group: "users" | "search" | "catalog" | "library" | "follow" | "personalization" | "playlists" | "player"
 }
 
@@ -390,9 +400,11 @@ type OAuthRequest = {
 type NowPlaying = {
   is_playing: boolean
   progress: string | null         // "m:ss"
+  progress_ms: number | null
   device: { name: string; type: string; volume_percent: number | null } | null
   item: { uri: string; name: string; artists: { name: string; uri: string }[];
-          album: string | null; image: string | null; duration: string } | null
+          album: string | null; image: string | null; duration: string;
+          duration_ms: number } | null
 }
 ```
 
