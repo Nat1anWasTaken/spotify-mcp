@@ -1,0 +1,20 @@
+[package]
+name = "spotify"
+description = "Spotify Web API client for spotify-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+schemars.workspace = true
+reqwest.workspace = true
+url.workspace = true
+base64.workspace = true
+rand.workspace = true
+sha2.workspace = true
+tracing.workspace = true
+chrono.workspace = true

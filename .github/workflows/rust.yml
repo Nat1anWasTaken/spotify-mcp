@@ -1,0 +1,83 @@
+name: Rust
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "crates/**"
+      - "migrations/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/rust.yml"
+  pull_request:
+    paths:
+      - "crates/**"
+      - "migrations/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/rust.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Installs the toolchain pinned in rust-toolchain.toml, with clippy and rustfmt.
+      - run: rustup toolchain install
+      - run: cargo fmt --all --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: telegram_mcp
+          POSTGRES_PASSWORD: telegram_mcp
+          POSTGRES_DB: telegram_mcp
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U telegram_mcp"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # `#[sqlx::test]` creates a throwaway database per test from this server.
+      DATABASE_URL: postgres://telegram_mcp:telegram_mcp@localhost:5432/telegram_mcp
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace --locked --no-run
+      # The ignored Postgres tests expect the schema the server applies at startup.
+      - name: Apply migrations
+        run: |
+          for migration in migrations/*.sql; do
+            psql -v ON_ERROR_STOP=1 -q "$DATABASE_URL" -f "$migration"
+          done
+      - run: cargo test --workspace --locked -- --include-ignored

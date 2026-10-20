@@ -1,0 +1,42 @@
+# Production stack for Dokploy. Dokploy writes the service's environment to
+# .env next to this file; see .env.example for the variables.
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    # Shutdown drains in-flight requests (e.g. wait_for_message, up to 60 s)
+    # before flushing Telegram sessions.
+    stop_grace_period: 60s
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://telegram_mcp:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/telegram_mcp
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "8080"
+    networks:
+      - default
+      - dokploy-network
+
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: telegram_mcp
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: telegram_mcp
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U telegram_mcp -d telegram_mcp"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
+
+networks:
+  dokploy-network:
+    external: true

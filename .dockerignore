@@ -1,0 +1,6 @@
+target
+.env
+.git
+web/node_modules
+web/dist
+docker-compose*.yml

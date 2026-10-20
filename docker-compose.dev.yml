@@ -1,0 +1,14 @@
+# Local development database: `docker compose -f docker-compose.dev.yml up -d`
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: spotify_mcp
+      POSTGRES_PASSWORD: spotify_mcp
+      POSTGRES_DB: spotify_mcp
+    ports:
+      - "5444:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+volumes:
+  pgdata:
