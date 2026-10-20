@@ -1,29 +1,45 @@
-# telegram-mcp
+# spotify-mcp
 
 A remote [MCP](https://modelcontextprotocol.io) server that lets AI agents
-(claude.ai, ChatGPT, Gemini, Claude Code, …) use **your own Telegram account**
-over MTProto, under permissions you control from a web dashboard.
+(claude.ai, ChatGPT, Claude Code, …) use **your own Spotify account** through
+the Spotify Web API, under permissions you control from a web dashboard.
 
-- **Sign in** to the dashboard with GitHub and link Telegram by scanning a QR code.
+- **Sign in** to the dashboard with Spotify. Signing in also links your Spotify
+  account: the tokens are stored encrypted and refreshed on demand. Sign in
+  again to re-link, for example after revoking access in your Spotify account
+  settings or when a new version asks for more scopes.
 - **Connect** an AI client by adding `https://<host>/mcp` as a custom connector.
   It authenticates with OAuth 2.1 (dynamic client registration or client ID
   metadata documents, PKCE), and you approve it on a consent screen.
-- **Control** every connected agent separately:
-  - enable or disable it;
-  - turn on the read-only kill switch;
-  - send its write actions to your outbox, where you approve or discard them
-    before they expire (after 1 minute to 1 week, your choice);
-  - choose the allowed tools;
-  - limit which chats it can see.
-- **Audit** every tool call, and approve or discard what is in your outbox.
-- **Get notified** of actions landing in your outbox, through push notifications
-  from the installable dashboard app. Tap one to review the request, edit it
-  (message text, target chat, …), and approve or discard it. Message text is
-  edited as highlighted markdown or HTML beside a preview of how Telegram will
-  show it, with a preview of every link in it.
+- **Use** search, the catalog (tracks, albums, artists, shows, episodes,
+  audiobooks), playlists, your library, follows, top items and recently played,
+  and playback (play, pause, skip, seek, volume, shuffle, repeat, queue,
+  devices). Playback control needs Spotify Premium.
+- **Control** every connected agent separately: enable or disable it, turn on
+  the read-only kill switch, and choose the allowed tools, grouped by area.
+- **Audit** every tool call, including denied ones.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and the
 dashboard API contract.
+
+## Spotify app
+
+Create an app at <https://developer.spotify.com/dashboard>:
+
+1. Choose **Web API** as the API used.
+2. Add the redirect URIs, `$PUBLIC_URL/auth/spotify/callback` for each
+   environment:
+   - development: `http://127.0.0.1:5173/auth/spotify/callback`
+   - production: `https://<host>/auth/spotify/callback`
+
+   Spotify rejects `localhost` redirect URIs; loopback addresses must be
+   written as `127.0.0.1` (or `[::1]`). Other URIs must use HTTPS.
+3. Copy the client ID and client secret into `SPOTIFY_CLIENT_ID` and
+   `SPOTIFY_CLIENT_SECRET`.
+4. New apps start in **development mode**, where only users you add can sign
+   in. Add each user (name and Spotify account email) under **User
+   Management** in the app's settings. Anyone else gets an error from
+   Spotify when they sign in.
 
 ## Development
 
@@ -31,35 +47,36 @@ Requirements: Rust (the pinned toolchain in `rust-toolchain.toml` installs
 itself), Node 22 with pnpm, Docker.
 
 ```sh
-docker compose -f docker-compose.dev.yml up -d   # Postgres on localhost:5442
+docker compose -f docker-compose.dev.yml up -d   # Postgres on localhost:5444
 cp .env.example .env                             # then fill it in, see below
-cargo run -p telegram-mcp                        # API + MCP on :8080, migrations run at startup
-cd web && pnpm install && pnpm dev               # dashboard on :5173, proxies to :8080
+cargo run -p spotify-mcp                         # API + MCP on :8080, migrations run at startup
+cd web && pnpm install && pnpm dev               # dashboard on http://127.0.0.1:5173, proxies to :8080
 ```
 
-Set `PUBLIC_URL=http://localhost:5173` while using the Vite dev server, so that
-OAuth redirects and cookies stay on one origin.
+Open the dashboard at `http://127.0.0.1:5173`, not `localhost`, and keep
+`PUBLIC_URL=http://127.0.0.1:5173` while using the Vite dev server, so that
+the Spotify redirect, OAuth redirects and cookies all stay on one origin.
 
-Tests (the integration tests use the dev database from `DATABASE_URL`):
+Tests (the integration tests use the dev database from `DATABASE_URL`; none of
+them contact Spotify):
 
 ```sh
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-cd web && pnpm lint && pnpm build
+cd web && pnpm lint && pnpm format:check && pnpm build
 ```
 
 ### Configuration
 
 | Variable | Purpose |
 | --- | --- |
-| `PUBLIC_URL` | External origin. OAuth metadata and the MCP resource URL derive from it. |
+| `PUBLIC_URL` | External origin. OAuth metadata, the MCP resource URL and the Spotify redirect URI (`$PUBLIC_URL/auth/spotify/callback`) derive from it. Use `http://127.0.0.1:5173` in development. |
 | `DATABASE_URL` | Postgres connection string. |
-| `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | GitHub OAuth app for dashboard login. The callback is `$PUBLIC_URL/auth/github/callback`. |
-| `ALLOWED_GITHUB_LOGINS` | Comma-separated GitHub logins allowed to sign in. Leave it empty to allow anyone. |
-| `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` | Telegram application credentials from <https://my.telegram.org/apps>. |
-| `ENCRYPTION_KEY` | 32 bytes, base64 (`openssl rand -base64 32`). It encrypts Telegram sessions at rest. |
-| `VAPID_SUBJECT` | Optional contact (`mailto:` or `https:` URL) that Web Push services see. It defaults to `PUBLIC_URL`. The VAPID key itself is generated on first start and stored encrypted. |
+| `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET` | The Spotify app's credentials, see [Spotify app](#spotify-app). |
+| `ENCRYPTION_KEY` | 32 bytes, base64 (`openssl rand -base64 32`). It encrypts Spotify tokens at rest. |
 | `BIND_ADDR`, `WEB_DIST` | Listen address (default `0.0.0.0:8080`) and dashboard build directory (default `web/dist`). |
+| `RUST_LOG` | Log filter, for example `info,spotify_mcp=debug`. |
+| `SPOTIFY_ACCOUNTS_URL`, `SPOTIFY_API_URL` | Optional overrides of `https://accounts.spotify.com` and `https://api.spotify.com`, for tests and mocks. |
 
 ## Deployment
 
@@ -72,17 +89,25 @@ deployed as a Dokploy compose service built from this repository.
    compose file.
 2. Point a domain at service `app`, port `8080`. TLS terminates at the
    Cloudflare tunnel in front of Traefik.
-3. In claude.ai, open Settings, then Connectors, then Add custom connector.
-   Enter `https://<host>/mcp` and leave the OAuth fields empty.
+3. Add `https://<host>/auth/spotify/callback` to the Spotify app's redirect
+   URIs, and add every user to the app while it is in development mode.
 
-### Outbox notifications
+## Connecting clients
 
-The dashboard can be installed as an app, and it then receives push
-notifications for actions landing in your outbox.
+The dashboard's Connect page shows the MCP URL and these steps.
 
-- **Desktop or Android:** open the dashboard in Chrome, Edge or Firefox, then
-  click Enable notifications on the Overview or Outbox page.
-- **iPhone or iPad (iOS 16.4 or later):** open the dashboard in Safari, tap
-  Share, then Add to Home Screen. Open the app from the Home Screen, sign in,
-  and enable notifications there. Safari only delivers push notifications to
-  apps installed this way.
+- **claude.ai** (also the Claude desktop and mobile apps): Settings, then
+  Connectors, then Add custom connector. Enter `https://<host>/mcp`, leave the
+  OAuth client ID and secret empty, then Connect and approve the request.
+- **Claude Code:** run
+  `claude mcp add --transport http spotify https://<host>/mcp`, then `/mcp`
+  inside Claude Code to authenticate.
+- **ChatGPT:** turn on developer mode (Settings, then Apps & Connectors, then
+  Advanced settings), create a connector with `https://<host>/mcp` and OAuth
+  authentication, then sign in and approve the request.
+- **Other clients:** any client that supports remote MCP servers over
+  Streamable HTTP with OAuth works; no client ID or secret is needed.
+
+The first connection sends you through "Continue with Spotify" if you aren't
+signed in to the dashboard yet, then to the consent screen, where you name the
+session and choose whether it is read-only.
