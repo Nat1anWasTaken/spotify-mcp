@@ -8,6 +8,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useSessions } from "@/hooks/use-sessions"
+import { useTools } from "@/hooks/use-tools"
 import type { ToolCallFilters } from "@/hooks/use-tool-calls"
 
 // Base UI selects need a concrete value for the "no filter" option.
@@ -26,6 +27,7 @@ export function ActivityFilters({
   onFilterChange,
 }: ActivityFiltersProps) {
   const sessions = useSessions()
+  const tools = useTools()
 
   const sessionItems = [
     { value: ALL, label: "All sessions" },
@@ -40,6 +42,16 @@ export function ActivityFilters({
       value,
       label,
     })),
+  ]
+
+  const toolNames = (tools.data ?? []).map((tool) => tool.name).sort()
+  // Keep a filter from the URL selectable even if the tool no longer exists.
+  if (filters.tool && !toolNames.includes(filters.tool)) {
+    toolNames.unshift(filters.tool)
+  }
+  const toolItems = [
+    { value: ALL, label: "All tools" },
+    ...toolNames.map((name) => ({ value: name, label: name })),
   ]
 
   return (
@@ -57,6 +69,13 @@ export function ActivityFilters({
         items={statusItems}
         value={filters.status}
         onValueChange={(value) => onFilterChange("status", value)}
+      />
+      <FilterSelect
+        id="filter-tool"
+        label="Tool"
+        items={toolItems}
+        value={filters.tool}
+        onValueChange={(value) => onFilterChange("tool", value)}
       />
     </div>
   )

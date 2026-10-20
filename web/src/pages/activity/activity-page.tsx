@@ -38,6 +38,7 @@ export function ActivityPage() {
   const filters: ToolCallFilters = {
     session_id: searchParams.get("session_id") ?? undefined,
     status: parseStatus(searchParams.get("status")),
+    tool: searchParams.get("tool") ?? undefined,
   }
 
   function setFilter(key: keyof ToolCallFilters, value: string | undefined) {
@@ -121,7 +122,7 @@ function ToolCallLog({ filters }: { filters: ToolCallFilters }) {
                 <RelativeTime value={call.created_at} />
               </TableCell>
               <TableCell>{call.session_name}</TableCell>
-              <TableCell>{call.tool}</TableCell>
+              <TableCell className="font-mono text-xs">{call.tool}</TableCell>
               <TableCell>
                 <ToolCallStatusBadge status={call.status} />
               </TableCell>

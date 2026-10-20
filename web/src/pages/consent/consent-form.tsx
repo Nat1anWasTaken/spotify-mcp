@@ -33,13 +33,12 @@ type ConsentFormProps = {
 }
 
 export function ConsentForm({ requestId, request }: ConsentFormProps) {
-  const { telegram } = useSignedInMe()
+  const { link } = useSignedInMe()
   const decide = useDecideOAuthRequest(requestId)
   const clientName = request.client_name ?? request.origin ?? "An AI agent"
   const existing = request.existing_session
   const [name, setName] = useState(existing?.name ?? clientName)
-  const [readOnly, setReadOnly] = useState(existing?.read_only ?? true)
-  const [useOutbox, setUseOutbox] = useState(existing?.use_outbox ?? true)
+  const [readOnly, setReadOnly] = useState(existing?.read_only ?? false)
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -47,7 +46,6 @@ export function ConsentForm({ requestId, request }: ConsentFormProps) {
       approve: true,
       name: name.trim() || clientName,
       read_only: readOnly,
-      use_outbox: useOutbox,
     })
   }
 
@@ -65,19 +63,19 @@ export function ConsentForm({ requestId, request }: ConsentFormProps) {
               {clientName.slice(0, 1).toUpperCase()}
             </AvatarFallback>
           </Avatar>
-          <CardTitle>{clientName} wants to use your Telegram account</CardTitle>
+          <CardTitle>{clientName} wants to use your Spotify account</CardTitle>
           <CardDescription>
             <ClientDetails request={request} />
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-6">
-          {!telegram.linked && (
+          {(!link.linked || link.status === "needs_relink") && (
             <Alert>
               <TriangleAlertIcon />
-              <AlertTitle>Telegram isn't linked yet</AlertTitle>
+              <AlertTitle>Your Spotify link has stopped working</AlertTitle>
               <AlertDescription>
                 You can approve now, but the agent won't be able to do anything
-                until you link Telegram on the dashboard.
+                until you re-link Spotify on the dashboard.
               </AlertDescription>
             </Alert>
           )}
@@ -97,29 +95,14 @@ export function ConsentForm({ requestId, request }: ConsentFormProps) {
               <FieldContent>
                 <FieldLabel htmlFor="consent-read-only">Read-only</FieldLabel>
                 <FieldDescription>
-                  Blocks every write tool. You can change this later.
+                  Lets the agent search and look, but not change your playlists,
+                  library or playback. You can change this later.
                 </FieldDescription>
               </FieldContent>
               <Switch
                 id="consent-read-only"
                 checked={readOnly}
                 onCheckedChange={setReadOnly}
-              />
-            </Field>
-            <Field orientation="horizontal">
-              <FieldContent>
-                <FieldLabel htmlFor="consent-use-outbox">
-                  Use the outbox
-                </FieldLabel>
-                <FieldDescription>
-                  Write tools go to your outbox on the dashboard, where you
-                  approve or discard them.
-                </FieldDescription>
-              </FieldContent>
-              <Switch
-                id="consent-use-outbox"
-                checked={useOutbox}
-                onCheckedChange={setUseOutbox}
               />
             </Field>
           </FieldGroup>

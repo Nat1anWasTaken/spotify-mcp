@@ -15,12 +15,8 @@ import {
 import { Switch } from "@/components/ui/switch"
 import { useUpdateSession, type SessionPatch } from "@/hooks/use-sessions"
 import type { AgentSession } from "@/lib/api"
-import { OutboxTtlField } from "@/pages/sessions/outbox-ttl-field"
 
-type PermissionKey = keyof Pick<
-  SessionPatch,
-  "enabled" | "read_only" | "use_outbox"
->
+type PermissionKey = keyof Pick<SessionPatch, "enabled" | "read_only">
 
 const PERMISSIONS: {
   key: PermissionKey
@@ -36,13 +32,7 @@ const PERMISSIONS: {
     key: "read_only",
     label: "Read-only",
     description:
-      "Blocks every write tool (sending, editing, deleting, …), whatever the settings below say.",
-  },
-  {
-    key: "use_outbox",
-    label: "Use the outbox",
-    description:
-      "Write tools go to your outbox, where you approve or discard them.",
+      "Blocks every write tool (playback control, playlist and library changes, follows), whatever the tool list below says.",
   },
 ]
 
@@ -75,7 +65,6 @@ export function SessionPermissionsCard({ session }: { session: AgentSession }) {
               </Field>
             )
           })}
-          <OutboxTtlField session={session} />
         </FieldGroup>
       </CardContent>
     </Card>

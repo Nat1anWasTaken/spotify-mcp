@@ -6,7 +6,6 @@ type OAuthDecision = {
   approve: boolean
   name?: string
   read_only?: boolean
-  use_outbox?: boolean
 }
 
 export function useOAuthRequest(id: string) {

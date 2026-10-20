@@ -7,11 +7,8 @@ import "./index.css"
 import { ThemeProvider } from "@/components/theme-provider"
 import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import { registerServiceWorker } from "@/lib/push"
 import { queryClient } from "@/lib/query-client"
 import { router } from "@/router"
-
-registerServiceWorker()
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

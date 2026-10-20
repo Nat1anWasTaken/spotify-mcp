@@ -3,7 +3,6 @@ import {
   BotIcon,
   HouseIcon,
   PlugIcon,
-  SendIcon,
   type LucideIcon,
 } from "lucide-react"
 import { matchPath, NavLink, useLocation } from "react-router"
@@ -17,25 +16,21 @@ import {
   SidebarGroupContent,
   SidebarHeader,
   SidebarMenu,
-  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
-import { useOutbox } from "@/hooks/use-tool-calls"
 
 type NavItem = { to: string; label: string; icon: LucideIcon; end?: boolean }
 
 const NAV_ITEMS: NavItem[] = [
   { to: "/", label: "Overview", icon: HouseIcon, end: true },
   { to: "/sessions", label: "Sessions", icon: BotIcon },
-  { to: "/outbox", label: "Outbox", icon: SendIcon },
   { to: "/activity", label: "Activity", icon: ActivityIcon },
   { to: "/connect", label: "Connect", icon: PlugIcon },
 ]
 
 export function AppSidebar() {
   const { pathname } = useLocation()
-  const pendingCount = useOutbox().data?.length ?? 0
 
   return (
     <Sidebar>
@@ -43,8 +38,8 @@ export function AppSidebar() {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" render={<NavLink to="/" />}>
-              <img src="/telegram.png" alt="" className="size-8" />
-              <span className="font-semibold">Telegram MCP</span>
+              <img src="/spotify.png" alt="" className="size-8" />
+              <span className="font-semibold">Spotify MCP</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
@@ -62,9 +57,6 @@ export function AppSidebar() {
                     <Icon />
                     <span>{label}</span>
                   </SidebarMenuButton>
-                  {to === "/outbox" && pendingCount > 0 && (
-                    <SidebarMenuBadge>{pendingCount}</SidebarMenuBadge>
-                  )}
                 </SidebarMenuItem>
               ))}
             </SidebarMenu>

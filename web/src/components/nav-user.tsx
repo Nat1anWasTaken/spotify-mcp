@@ -14,6 +14,7 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
 import { useLogout, useMe } from "@/hooks/use-me"
+import { initials } from "@/lib/format"
 
 export function NavUser() {
   const user = useMe().data?.user
@@ -22,6 +23,7 @@ export function NavUser() {
   if (!user) {
     return null
   }
+  const name = user.display_name ?? user.spotify_id
 
   return (
     <SidebarMenu>
@@ -30,14 +32,12 @@ export function NavUser() {
           <DropdownMenuTrigger render={<SidebarMenuButton size="lg" />}>
             <Avatar>
               {user.avatar_url && <AvatarImage src={user.avatar_url} alt="" />}
-              <AvatarFallback>
-                {user.github_login.slice(0, 2).toUpperCase()}
-              </AvatarFallback>
+              <AvatarFallback>{initials(name)}</AvatarFallback>
             </Avatar>
             <div className="flex min-w-0 flex-1 flex-col">
-              <span className="truncate">{user.name ?? user.github_login}</span>
+              <span className="truncate">{name}</span>
               <span className="truncate text-xs text-muted-foreground">
-                @{user.github_login}
+                {user.email ?? user.spotify_id}
               </span>
             </div>
             <ChevronsUpDownIcon />

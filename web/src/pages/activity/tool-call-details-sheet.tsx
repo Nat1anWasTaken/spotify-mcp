@@ -43,7 +43,6 @@ function ToolCallDetails({ call }: { call: ToolCall }) {
         <div className="flex flex-wrap items-center gap-2">
           <ToolCallStatusBadge status={call.status} />
           {call.duration_ms !== null && formatDuration(call.duration_ms)}
-          {call.decided_at && ` · decided ${formatDateTime(call.decided_at)}`}
         </div>
         <Section title="Arguments">
           <JsonBlock value={call.arguments} />

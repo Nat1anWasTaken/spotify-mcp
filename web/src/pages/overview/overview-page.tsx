@@ -1,7 +1,6 @@
 import { Link } from "react-router"
 
 import { CopyField } from "@/components/copy-field"
-import { NotificationsCard } from "@/components/notifications-card"
 import { PageHeader } from "@/components/page-header"
 import { Button } from "@/components/ui/button"
 import {
@@ -14,50 +13,33 @@ import {
 } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useSessions } from "@/hooks/use-sessions"
-import { useOutbox } from "@/hooks/use-tool-calls"
 import { MCP_URL } from "@/lib/mcp-url"
-import { TelegramCard } from "@/pages/overview/telegram-card"
+import { LinkCard } from "@/pages/overview/link-card"
+import { NowPlayingCard } from "@/pages/overview/now-playing-card"
+import { ProfileCard } from "@/pages/overview/profile-card"
 
 export function OverviewPage() {
-  const sessions = useSessions()
-  const outbox = useOutbox()
-
   return (
     <>
       <PageHeader title="Overview" />
-      <TelegramCard />
       <div className="grid gap-4 md:grid-cols-2">
-        <CountCard
-          title="Active sessions"
-          count={sessions.data?.length}
-          to="/sessions"
-          linkLabel="View sessions"
-        />
-        <CountCard
-          title="In your outbox"
-          count={outbox.data?.length}
-          to="/outbox"
-          linkLabel="Review"
-        />
+        <ProfileCard />
+        <NowPlayingCard />
       </div>
-      <NotificationsCard />
+      <LinkCard />
+      <SessionsCard />
       <McpUrlCard />
     </>
   )
 }
 
-type CountCardProps = {
-  title: string
-  count: number | undefined
-  to: string
-  linkLabel: string
-}
+function SessionsCard() {
+  const count = useSessions().data?.length
 
-function CountCard({ title, count, to, linkLabel }: CountCardProps) {
   return (
     <Card>
       <CardHeader>
-        <CardDescription>{title}</CardDescription>
+        <CardDescription>Connected agents</CardDescription>
         <CardTitle>
           {count === undefined ? <Skeleton className="h-6 w-8" /> : count}
         </CardTitle>
@@ -65,10 +47,10 @@ function CountCard({ title, count, to, linkLabel }: CountCardProps) {
           <Button
             variant="outline"
             size="sm"
-            render={<Link to={to} />}
+            render={<Link to="/sessions" />}
             nativeButton={false}
           >
-            {linkLabel}
+            View sessions
           </Button>
         </CardAction>
       </CardHeader>
@@ -82,7 +64,8 @@ function McpUrlCard() {
       <CardHeader>
         <CardTitle>MCP server URL</CardTitle>
         <CardDescription>
-          Add this URL as a custom connector in your AI client.
+          Add this URL as a custom connector in claude.ai, ChatGPT, Claude Code
+          or another MCP client.
         </CardDescription>
         <CardAction>
           <Button

@@ -33,14 +33,25 @@ export function formatDuration(ms: number): string {
   return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`
 }
 
-/** "4:05" for a span of milliseconds, clamped at zero. */
-export function formatCountdown(ms: number): string {
-  const totalSeconds = Math.max(0, Math.ceil(ms / 1000))
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = totalSeconds % 60
-  return `${minutes}:${seconds.toString().padStart(2, "0")}`
-}
-
 export function formatJson(value: unknown): string {
   return JSON.stringify(value, null, 2)
+}
+
+/** Up to two initials for an avatar fallback: "Ada Lovelace" → "AL". */
+export function initials(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean)
+  const letters =
+    words.length > 1
+      ? words[0][0] + words[words.length - 1][0]
+      : name.slice(0, 2)
+  return letters.toUpperCase()
+}
+
+/** Seconds in an "m:ss" (or "h:mm:ss") duration; null if it doesn't parse. */
+export function parseClock(value: string): number | null {
+  const parts = value.split(":").map(Number)
+  if (parts.length < 2 || parts.some((part) => !Number.isFinite(part))) {
+    return null
+  }
+  return parts.reduce((total, part) => total * 60 + part, 0)
 }

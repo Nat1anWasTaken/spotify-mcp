@@ -2,38 +2,24 @@
 
 export type User = {
   id: string
-  github_login: string
-  name: string | null
+  spotify_id: string
+  display_name: string | null
+  email: string | null
   avatar_url: string | null
+  product: string | null // "premium" | "free" | ...
+  country: string | null
 }
 
-export type TelegramStatus = {
+export type LinkStatus = {
   linked: boolean
-  account: {
-    tg_user_id: number
-    display_name: string
-    username: string | null
-    phone: string | null
-  } | null
+  status: "ok" | "renewing" | "needs_relink" | null
+  scopes: string[]
+  /** Non-empty: sign in again to grant them. */
+  missing_scopes: string[]
+  expires_at: string | null
+  last_ok_at: string | null
+  last_error: string | null
 }
-
-// QR login flow, polled by the dashboard about once per second.
-export type LoginState =
-  | { state: "idle" }
-  | { state: "waiting_scan"; qr_url: string; expires_at: string } // render qr_url as a QR code
-  | { state: "password_required"; password_hint: string | null } // 2FA
-  | { state: "success"; account: TelegramStatus["account"] }
-  | { state: "failed"; error: string }
-
-export type PeerKind = "user" | "bot" | "group" | "channel"
-export type PeerSummary = {
-  id: number
-  kind: PeerKind
-  title: string
-  username: string | null
-}
-
-export type PeerScope = { mode: "all" | "allow" | "deny"; peers: PeerSummary[] }
 
 export type AgentSession = {
   id: string
@@ -43,25 +29,30 @@ export type AgentSession = {
   origin: string | null // e.g. "claude.ai", "chatgpt.com", "localhost"
   enabled: boolean
   read_only: boolean
-  use_outbox: boolean
-  /** How long a write call waits in the outbox: 1 to 10080 (a week). */
-  outbox_ttl_minutes: number
   allowed_tools: string[] | null // null = all tools
-  peer_scope: PeerScope
   created_at: string
   last_used_at: string | null
-  outbox_count: number
 }
+
+export type ToolGroup =
+  | "users"
+  | "search"
+  | "catalog"
+  | "library"
+  | "follow"
+  | "personalization"
+  | "playlists"
+  | "player"
 
 export type ToolInfo = {
   name: string
   title: string
   description: string
   kind: "read" | "write"
+  group: ToolGroup
 }
 
-export type ToolCallStatus =
-  "running" | "ok" | "error" | "denied" | "queued" | "discarded" | "expired"
+export type ToolCallStatus = "running" | "ok" | "error" | "denied"
 export type ToolCall = {
   id: string
   session_id: string
@@ -69,21 +60,11 @@ export type ToolCall = {
   tool: string
   /** As logged: long strings are truncated. */
   arguments: Record<string, unknown>
-  /** The agent's arguments, when the user edited them before approving. */
-  original_arguments: Record<string, unknown> | null
   status: ToolCallStatus
   result: unknown | null
   error: string | null
   duration_ms: number | null
   created_at: string
-  outbox_expires_at: string | null
-  decided_at: string | null
-}
-
-/** A call as its outbox page shows it. */
-export type ToolCallDetail = ToolCall & {
-  /** The full arguments while the call is in the outbox; null afterwards. */
-  editable_arguments: Record<string, unknown> | null
 }
 
 export type OAuthRequest = {
@@ -95,46 +76,29 @@ export type OAuthRequest = {
   redirect_uri: string
   scope: string
   /** Set when re-authorizing a client that already has an active session. */
-  existing_session: {
+  existing_session: { name: string; read_only: boolean } | null
+}
+
+/** What `GET /api/now-playing` returns while something plays; null otherwise. */
+export type NowPlaying = {
+  is_playing: boolean
+  progress: string | null // "m:ss"
+  device: {
     name: string
-    read_only: boolean
-    use_outbox: boolean
+    type: string
+    volume_percent: number | null
+  } | null
+  item: {
+    uri: string
+    name: string
+    artists: { name: string; uri: string }[]
+    album: string | null
+    image: string | null
+    duration: string // "m:ss"
   } | null
 }
 
-export type ParseMode = "markdown" | "html" | "plain"
-
-/** Offsets and lengths count UTF-16 code units, like JavaScript strings. */
-export type TextEntity = { offset: number; length: number } & (
-  | {
-      type:
-        | "bold"
-        | "italic"
-        | "underline"
-        | "strike"
-        | "spoiler"
-        | "code"
-        | "url"
-        | "blockquote"
-        | "mention"
-    }
-  | { type: "pre"; language: string }
-  | { type: "text_url"; url: string }
-)
-
-/** Message text as Telegram will receive it. */
-export type FormattedText = { text: string; entities: TextEntity[] }
-
-/** Every field is null when the link couldn't be previewed. */
-export type LinkPreview = {
-  final_url: string | null
-  title: string | null
-  description: string | null
-  image: string | null
-  site_name: string | null
-}
-
-export type Me = { user: User; telegram: TelegramStatus }
+export type Me = { user: User; link: LinkStatus }
 
 export type ToolCallPage = { items: ToolCall[]; next_before: string | null }
 

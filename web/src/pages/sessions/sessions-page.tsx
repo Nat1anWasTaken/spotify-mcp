@@ -5,7 +5,6 @@ import { ErrorAlert } from "@/components/error-alert"
 import { PageHeader } from "@/components/page-header"
 import { RelativeTime } from "@/components/relative-time"
 import { SessionStatusBadges } from "@/components/session-status-badges"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Empty,
@@ -32,7 +31,7 @@ export function SessionsPage() {
     <>
       <PageHeader
         title="Sessions"
-        description="AI agents connected to your Telegram account."
+        description="AI agents connected to your Spotify account."
       />
       <SessionsContent />
     </>
@@ -63,7 +62,6 @@ function SessionsTable({ sessions }: { sessions: AgentSession[] }) {
           <TableHead>Client</TableHead>
           <TableHead>Status</TableHead>
           <TableHead>Last used</TableHead>
-          <TableHead>Outbox</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -90,13 +88,6 @@ function SessionsTable({ sessions }: { sessions: AgentSession[] }) {
                 <RelativeTime value={session.last_used_at} />
               ) : (
                 "Never"
-              )}
-            </TableCell>
-            <TableCell>
-              {session.outbox_count > 0 && (
-                <Badge render={<Link to="/outbox" />}>
-                  {session.outbox_count}
-                </Badge>
               )}
             </TableCell>
           </TableRow>

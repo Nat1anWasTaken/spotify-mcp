@@ -4,16 +4,7 @@ import { toast } from "sonner"
 import { api, type AgentSession } from "@/lib/api"
 
 export type SessionPatch = Partial<
-  Pick<
-    AgentSession,
-    | "name"
-    | "enabled"
-    | "read_only"
-    | "use_outbox"
-    | "outbox_ttl_minutes"
-    | "allowed_tools"
-    | "peer_scope"
-  >
+  Pick<AgentSession, "name" | "enabled" | "read_only" | "allowed_tools">
 >
 
 export const sessionsQueryKey = ["sessions"] as const

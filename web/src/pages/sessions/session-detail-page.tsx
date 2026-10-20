@@ -10,7 +10,6 @@ import { useSession } from "@/hooks/use-sessions"
 import type { AgentSession } from "@/lib/api"
 import { formatDateTime } from "@/lib/format"
 import { DisconnectSessionButton } from "@/pages/sessions/disconnect-session-button"
-import { SessionChatAccessCard } from "@/pages/sessions/session-chat-access-card"
 import { SessionNameForm } from "@/pages/sessions/session-name-form"
 import { SessionPermissionsCard } from "@/pages/sessions/session-permissions-card"
 import { SessionRecentActivityCard } from "@/pages/sessions/session-recent-activity-card"
@@ -65,7 +64,6 @@ function SessionDetail({ session }: { session: AgentSession }) {
       <SessionNameForm session={session} />
       <SessionPermissionsCard session={session} />
       <SessionToolsCard session={session} />
-      <SessionChatAccessCard session={session} />
       <SessionRecentActivityCard sessionId={session.id} />
     </>
   )

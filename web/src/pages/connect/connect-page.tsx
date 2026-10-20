@@ -17,15 +17,15 @@ export function ConnectPage() {
     <>
       <PageHeader
         title="Connect an agent"
-        description="Add this server to your AI client. You'll be asked to approve the connection here."
+        description="Add this server to your AI client. You'll sign in with Spotify if needed, then approve the connection here."
       />
       <CopyField label="MCP server URL" value={MCP_URL} />
       <Tabs defaultValue="claude-ai">
         <TabsList>
           <TabsTrigger value="claude-ai">claude.ai</TabsTrigger>
-          <TabsTrigger value="chatgpt">ChatGPT</TabsTrigger>
           <TabsTrigger value="claude-code">Claude Code</TabsTrigger>
-          <TabsTrigger value="other">Gemini & others</TabsTrigger>
+          <TabsTrigger value="chatgpt">ChatGPT</TabsTrigger>
+          <TabsTrigger value="other">Others</TabsTrigger>
         </TabsList>
         <TabsContent value="claude-ai">
           <Instructions
@@ -61,12 +61,12 @@ export function ConnectPage() {
             <li>
               <CopyField
                 label="Claude Code command"
-                value={`claude mcp add --transport http telegram ${MCP_URL}`}
+                value={`claude mcp add --transport http spotify ${MCP_URL}`}
               />
             </li>
             <li>Start Claude Code and run /mcp.</li>
             <li>
-              Choose “telegram”, authenticate, and approve the request here.
+              Choose “spotify”, authenticate, and approve the request here.
             </li>
           </Instructions>
         </TabsContent>
@@ -76,10 +76,10 @@ export function ConnectPage() {
             description="Any client that supports remote MCP servers over Streamable HTTP with OAuth works."
           >
             <li>
-              Gemini CLI: run this command, then /mcp auth telegram.
+              Gemini CLI: run this command, then /mcp auth spotify.
               <CopyField
                 label="Gemini CLI command"
-                value={`gemini mcp add --transport http telegram ${MCP_URL}`}
+                value={`gemini mcp add --transport http spotify ${MCP_URL}`}
               />
             </li>
             <li>

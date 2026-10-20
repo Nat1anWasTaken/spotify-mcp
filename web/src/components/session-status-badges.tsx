@@ -2,7 +2,7 @@ import { Badge } from "@/components/ui/badge"
 import type { AgentSession } from "@/lib/api"
 
 type SessionStatusBadgesProps = {
-  session: Pick<AgentSession, "enabled" | "read_only" | "use_outbox">
+  session: Pick<AgentSession, "enabled" | "read_only">
 }
 
 export function SessionStatusBadges({ session }: SessionStatusBadgesProps) {
@@ -14,7 +14,6 @@ export function SessionStatusBadges({ session }: SessionStatusBadgesProps) {
         <Badge variant="destructive">Disabled</Badge>
       )}
       {session.read_only && <Badge variant="outline">Read-only</Badge>}
-      {session.use_outbox && <Badge variant="outline">Outbox</Badge>}
     </div>
   )
 }
