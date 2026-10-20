@@ -3,6 +3,8 @@ const dateTimeFormat = new Intl.DateTimeFormat(undefined, {
   timeStyle: "short",
 })
 
+const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "long" })
+
 const relativeTimeFormat = new Intl.RelativeTimeFormat(undefined, {
   numeric: "auto",
 })
@@ -18,6 +20,11 @@ const RELATIVE_UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
 
 export function formatDateTime(iso: string): string {
   return dateTimeFormat.format(new Date(iso))
+}
+
+/** "April 20, 2027" */
+export function formatDate(iso: string): string {
+  return dateFormat.format(new Date(iso))
 }
 
 /** "3 minutes ago", "yesterday", … */
@@ -45,13 +52,4 @@ export function initials(name: string): string {
       ? words[0][0] + words[words.length - 1][0]
       : name.slice(0, 2)
   return letters.toUpperCase()
-}
-
-/** Seconds in an "m:ss" (or "h:mm:ss") duration; null if it doesn't parse. */
-export function parseClock(value: string): number | null {
-  const parts = value.split(":").map(Number)
-  if (parts.length < 2 || parts.some((part) => !Number.isFinite(part))) {
-    return null
-  }
-  return parts.reduce((total, part) => total * 60 + part, 0)
 }

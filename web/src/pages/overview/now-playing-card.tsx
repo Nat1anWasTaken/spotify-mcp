@@ -25,7 +25,6 @@ import { Progress } from "@/components/ui/progress"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useNowPlaying } from "@/hooks/use-now-playing"
 import type { NowPlaying } from "@/lib/api"
-import { parseClock } from "@/lib/format"
 
 export function NowPlayingCard() {
   return (
@@ -65,8 +64,8 @@ type TrackProps = {
 }
 
 function Track({ playing, item }: TrackProps) {
-  const progress = playing.progress ? parseClock(playing.progress) : null
-  const duration = parseClock(item.duration)
+  const progress = playing.progress_ms
+  const duration = item.duration_ms
   const percent =
     progress !== null && duration
       ? Math.min(100, (progress / duration) * 100)

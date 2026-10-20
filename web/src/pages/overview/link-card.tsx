@@ -15,13 +15,17 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { useSignedInMe } from "@/hooks/use-me"
-import { signInWithSpotify } from "@/lib/spotify"
+import { useNow } from "@/hooks/use-now"
+import { formatDate } from "@/lib/format"
+import { reauthorizeState, signInWithSpotify } from "@/lib/spotify"
 
 export function LinkCard() {
   const { link } = useSignedInMe()
+  const reauthorize = reauthorizeState(link.reauthorize_by, useNow(60_000))
   const needsRelink =
     !link.linked ||
     link.status === "needs_relink" ||
+    reauthorize !== "ok" ||
     link.missing_scopes.length > 0
 
   return (
@@ -32,7 +36,8 @@ export function LinkCard() {
           <LinkStatusBadge link={link} />
         </CardTitle>
         <CardDescription>
-          The Spotify access your agents use. It renews itself as needed.
+          The Spotify access your agents use. It renews itself as needed, but
+          Spotify ends it six months after each sign-in.
         </CardDescription>
         <CardAction>
           <Button
@@ -59,6 +64,27 @@ export function LinkCard() {
           </Alert>
         )}
         <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-[auto_1fr]">
+          {link.reauthorize_by && (
+            <Row label="Sign in again by">
+              <span
+                className={
+                  reauthorize === "ok"
+                    ? undefined
+                    : reauthorize === "expired"
+                      ? "font-medium text-destructive"
+                      : "font-medium"
+                }
+              >
+                {formatDate(link.reauthorize_by)} (
+                <RelativeTime value={link.reauthorize_by} />)
+              </span>
+            </Row>
+          )}
+          {link.authorized_at && (
+            <Row label="Signed in with Spotify">
+              <RelativeTime value={link.authorized_at} />
+            </Row>
+          )}
           <Row label="Last successful call">
             {link.last_ok_at ? (
               <RelativeTime value={link.last_ok_at} />

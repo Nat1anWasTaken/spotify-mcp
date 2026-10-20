@@ -186,6 +186,9 @@ function ToolGroupFieldSet({
                   >
                     {tool.kind === "write" ? "Write" : "Read"}
                   </Badge>
+                  {tool.destructive && (
+                    <Badge variant="destructive">Destructive</Badge>
+                  )}
                 </FieldLabel>
                 <FieldDescription className="line-clamp-2">
                   <code className="text-xs">{tool.name}</code> ·{" "}

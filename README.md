@@ -5,15 +5,16 @@ A remote [MCP](https://modelcontextprotocol.io) server that lets AI agents
 the Spotify Web API, under permissions you control from a web dashboard.
 
 - **Sign in** to the dashboard with Spotify. Signing in also links your Spotify
-  account: the tokens are stored encrypted and refreshed on demand. Sign in
-  again to re-link, for example after revoking access in your Spotify account
-  settings or when a new version asks for more scopes.
+  account: the tokens are stored encrypted and refreshed on demand. Spotify
+  ends app access six months after each sign-in, so the dashboard asks you to
+  sign in again before then. Sign in again also after revoking access in your
+  Spotify account settings or when a new version asks for more scopes.
 - **Connect** an AI client by adding `https://<host>/mcp` as a custom connector.
   It authenticates with OAuth 2.1 (dynamic client registration or client ID
   metadata documents, PKCE), and you approve it on a consent screen.
 - **Use** search, the catalog (tracks, albums, artists, shows, episodes,
-  audiobooks), playlists, your library, follows, top items and recently played,
-  and playback (play, pause, skip, seek, volume, shuffle, repeat, queue,
+  audiobooks), playlists, your library (saved items, and followed artists,
+  users and playlists), top items and recently played, and playback (play, pause, skip, seek, volume, shuffle, repeat, queue,
   devices). Playback control needs Spotify Premium.
 - **Control** every connected agent separately: enable or disable it, turn on
   the read-only kill switch, and choose the allowed tools, grouped by area.
@@ -36,10 +37,16 @@ Create an app at <https://developer.spotify.com/dashboard>:
    written as `127.0.0.1` (or `[::1]`). Other URIs must use HTTPS.
 3. Copy the client ID and client secret into `SPOTIFY_CLIENT_ID` and
    `SPOTIFY_CLIENT_SECRET`.
-4. New apps start in **development mode**, where only users you add can sign
-   in. Add each user (name and Spotify account email) under **User
-   Management** in the app's settings. Anyone else gets an error from
-   Spotify when they sign in.
+4. New apps start in **development mode**, with these limits:
+   - Only users you add can sign in, at most 5. Add each one (name and
+     Spotify account email) under **User Management** in the app's settings.
+     Anyone else is turned away, and the dashboard tells them to ask you.
+   - The app owner's Spotify account needs Premium.
+   - Refresh tokens expire six months after each sign-in, whatever their
+     use. Users then sign in again; the dashboard warns them two weeks ahead.
+   - Spotify no longer returns email, country or subscription level from
+     `/me`, so the dashboard can't tell whether a user has Premium (needed
+     for playback control).
 
 ## Development
 

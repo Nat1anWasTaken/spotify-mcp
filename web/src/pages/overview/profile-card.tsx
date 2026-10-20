@@ -1,4 +1,4 @@
-import { TriangleAlertIcon } from "lucide-react"
+import { InfoIcon, TriangleAlertIcon } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -16,7 +16,9 @@ import { initials } from "@/lib/format"
 export function ProfileCard() {
   const { user } = useSignedInMe()
   const name = user.display_name ?? user.spotify_id
-  const premium = user.product === "premium"
+  // Usually null: development-mode apps no longer get product, email or
+  // country from Spotify.
+  const product = user.product
   const details = [user.email, user.country].filter(Boolean).join(" · ")
 
   return (
@@ -29,27 +31,34 @@ export function ProfileCard() {
         <div className="flex min-w-0 flex-col gap-1">
           <CardTitle className="flex flex-wrap items-center gap-2">
             <span className="truncate">{name}</span>
-            {user.product && (
-              <Badge variant={premium ? "default" : "secondary"}>
-                {productLabel(user.product)}
+            {product && (
+              <Badge variant={product === "premium" ? "default" : "secondary"}>
+                {productLabel(product)}
               </Badge>
             )}
           </CardTitle>
-          <CardDescription className="truncate">
-            {details || user.spotify_id}
-          </CardDescription>
+          {details && (
+            <CardDescription className="truncate">{details}</CardDescription>
+          )}
         </div>
       </CardHeader>
-      {!premium && (
+      {product !== "premium" && (
         <CardContent>
-          <Alert>
-            <TriangleAlertIcon />
-            <AlertTitle>Playback control needs Premium</AlertTitle>
-            <AlertDescription>
-              Spotify only lets apps play, pause, skip or queue on Premium
-              accounts. Search, playlists and your library still work.
-            </AlertDescription>
-          </Alert>
+          {product ? (
+            <Alert>
+              <TriangleAlertIcon />
+              <AlertTitle>Playback control needs Premium</AlertTitle>
+              <AlertDescription>
+                Spotify only lets apps play, pause, skip or queue on Premium
+                accounts. Search, playlists and your library still work.
+              </AlertDescription>
+            </Alert>
+          ) : (
+            <p className="flex gap-2 text-sm text-muted-foreground">
+              <InfoIcon className="mt-0.5 size-4 shrink-0" />
+              Playback control (play, pause, skip, queue) needs Spotify Premium.
+            </p>
+          )}
         </CardContent>
       )}
     </Card>

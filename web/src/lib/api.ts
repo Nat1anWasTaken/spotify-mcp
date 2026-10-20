@@ -6,7 +6,9 @@ export type User = {
   display_name: string | null
   email: string | null
   avatar_url: string | null
-  product: string | null // "premium" | "free" | ...
+  /** "premium" | "free" | ...; usually null, like email and country, since
+   * development-mode apps no longer get them from /me. */
+  product: string | null
   country: string | null
 }
 
@@ -19,6 +21,10 @@ export type LinkStatus = {
   expires_at: string | null
   last_ok_at: string | null
   last_error: string | null
+  /** The last Spotify sign-in. */
+  authorized_at: string | null
+  /** `authorized_at` + 6 months: the refresh token's hard expiry. */
+  reauthorize_by: string | null
 }
 
 export type AgentSession = {
@@ -49,6 +55,8 @@ export type ToolInfo = {
   title: string
   description: string
   kind: "read" | "write"
+  /** A write that removes or replaces something. */
+  destructive: boolean
   group: ToolGroup
 }
 
@@ -83,6 +91,7 @@ export type OAuthRequest = {
 export type NowPlaying = {
   is_playing: boolean
   progress: string | null // "m:ss"
+  progress_ms: number | null
   device: {
     name: string
     type: string
@@ -95,6 +104,7 @@ export type NowPlaying = {
     album: string | null
     image: string | null
     duration: string // "m:ss"
+    duration_ms: number
   } | null
 }
 

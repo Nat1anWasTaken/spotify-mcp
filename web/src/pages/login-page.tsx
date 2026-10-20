@@ -27,6 +27,11 @@ const ERRORS: Record<string, { title: string; description: string }> = {
     description:
       "That sign-in attempt timed out or was started in another browser. Please try again.",
   },
+  not_allowed: {
+    title: "This Spotify account isn't on the list",
+    description:
+      "This app is in Spotify's development mode, so only the Spotify accounts its owner added under User Management in the Spotify developer dashboard (up to 5) can sign in. Ask the owner to add the email address of your Spotify account, then try again.",
+  },
   spotify: {
     title: "Spotify had a problem",
     description:
