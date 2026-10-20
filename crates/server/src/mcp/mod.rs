@@ -6,6 +6,8 @@ mod output;
 mod pipeline;
 mod policy;
 mod server;
+#[cfg(test)]
+mod tests;
 mod tools;
 
 use std::sync::Arc;
