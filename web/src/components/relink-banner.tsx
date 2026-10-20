@@ -47,10 +47,10 @@ export function RelinkBanner() {
     }
   } else if (link.missing_scopes.length > 0) {
     notice = {
-      error: false,
+      error: true,
       title: "Spotify needs a few more permissions",
       description:
-        "Some tools won't work until you sign in with Spotify again and grant the new permissions.",
+        "Agents can't use Spotify until you sign in with Spotify again and grant the new permissions.",
     }
   }
   if (!notice) {

@@ -8,8 +8,11 @@
 //! - [`mark_ok`] / [`mark_invalid`] with the outcome of a call;
 //! - [`status`] for `/api/me`.
 //!
-//! There is no background renewal: Spotify refresh tokens do not expire on a
-//! schedule, so refreshing when a call needs it is enough.
+//! There is no background renewal: refreshing when a call needs it is
+//! enough. Refresh tokens themselves expire [`REFRESH_TOKEN_LIFETIME`] after
+//! the user's sign-in, which refreshing does not extend; the dashboard warns
+//! ahead of `reauthorize_by`, and after it the refresh fails as
+//! `needs_relink`.
 
 use std::sync::Arc;
 
@@ -204,7 +207,22 @@ pub async fn refresh(
 /// stored token is a different one already; without, unless it is fresh by
 /// now. Either way a caller that waited for the lock reuses the token the
 /// caller before it obtained.
+///
+/// Detached, so a caller that goes away (a disconnected client) cannot leave
+/// the link `renewing` or drop the tokens Spotify just issued.
 async fn renew(
+    state: &AppState,
+    user_id: Uuid,
+    stale_hash: Option<&str>,
+) -> anyhow::Result<Option<Linked>> {
+    let state = state.clone();
+    let stale_hash = stale_hash.map(str::to_owned);
+    tokio::spawn(async move { renew_locked(&state, user_id, stale_hash.as_deref()).await })
+        .await
+        .context("refresh task failed")?
+}
+
+async fn renew_locked(
     state: &AppState,
     user_id: Uuid,
     stale_hash: Option<&str>,

@@ -4,7 +4,7 @@
 
 use serde_json::{Value, json};
 
-use super::helpers::{count, market, paging};
+use super::helpers::{market, paging};
 use crate::{
     Account, Error, Result, compact, ids,
     rest::Body,
@@ -85,7 +85,6 @@ impl Account {
 
 /// The request's items as `spotify:{kind}:{id}` URIs.
 fn library_uris(request: &LibraryRequest) -> Result<Vec<String>> {
-    count("ids", &request.ids, 1, MAX_LIBRARY_URIS)?;
     let kind = request.kind.as_str();
     Ok(ids::ids(&request.ids, kind, MAX_LIBRARY_URIS)?
         .into_iter()

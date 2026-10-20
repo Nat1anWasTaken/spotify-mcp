@@ -395,10 +395,9 @@ pub(crate) fn now_playing(state: &Value) -> Value {
             (
                 json!([{ "name": show["name"], "uri": show["uri"] }]),
                 Value::Null,
-                if item["images"].is_array() {
-                    self::image(item)
-                } else {
-                    self::image(show)
+                match self::image(item) {
+                    Value::Null => self::image(show),
+                    image => image,
                 },
             )
         } else {

@@ -56,7 +56,7 @@ export function LinkCard() {
             <AlertTitle>Some permissions are missing</AlertTitle>
             <AlertDescription>
               <p>
-                Re-link Spotify to grant them; tools that need them will fail
+                Re-link Spotify to grant them; agents can&apos;t use Spotify
                 until you do.
               </p>
               <ScopeList scopes={link.missing_scopes} />

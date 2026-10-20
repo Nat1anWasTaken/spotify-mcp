@@ -143,6 +143,12 @@ impl Spotify {
             .await
             .map_err(|e| Error::Http(e.without_url()))?;
         let status = response.status();
+        let retry_after = response
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .map(std::time::Duration::from_secs);
         let body = response
             .text()
             .await
@@ -151,12 +157,17 @@ impl Spotify {
             return serde_json::from_str(&body)
                 .map_err(|e| Error::Decode(format!("token response: {e}")));
         }
-        Err(token_error(status.as_u16(), &body))
+        Err(token_error(status.as_u16(), retry_after, &body))
     }
 }
 
 /// Maps a failed token response (`{error, error_description}`, RFC 6749).
-fn token_error(status: u16, body: &str) -> Error {
+fn token_error(status: u16, retry_after: Option<std::time::Duration>, body: &str) -> Error {
+    if status == 429 {
+        return Error::RateLimited {
+            retry_after: retry_after.unwrap_or(std::time::Duration::from_secs(1)),
+        };
+    }
     #[derive(Deserialize)]
     struct OAuthError {
         error: String,
@@ -170,9 +181,6 @@ fn token_error(status: u16, body: &str) -> Error {
                 Some(description) => format!("{}: {description}", e.error),
                 None => e.error,
             },
-        },
-        Err(_) if status == 429 => Error::RateLimited {
-            retry_after: std::time::Duration::from_secs(1),
         },
         Err(_) => Error::Api {
             status,
@@ -235,17 +243,22 @@ mod tests {
         assert!(matches!(
             token_error(
                 400,
+                None,
                 r#"{"error":"invalid_grant","error_description":"Invalid refresh token"}"#
             ),
             Error::InvalidGrant
         ));
         assert!(matches!(
-            token_error(400, r#"{"error":"invalid_client"}"#),
+            token_error(400, None, r#"{"error":"invalid_client"}"#),
             Error::Api { status: 400, .. }
         ));
         assert!(matches!(
-            token_error(502, "<html>"),
+            token_error(502, None, "<html>"),
             Error::Api { status: 502, .. }
+        ));
+        assert!(matches!(
+            token_error(429, Some(std::time::Duration::from_secs(30)), r#"{"error":"x"}"#),
+            Error::RateLimited { retry_after } if retry_after.as_secs() == 30
         ));
     }
 }

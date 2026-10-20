@@ -18,6 +18,7 @@ impl Account {
             ));
         }
         let mut types: Vec<&str> = request.types.iter().map(|t| t.as_str()).collect();
+        types.sort_unstable();
         types.dedup();
         let [limit, _] = paging(request.limit, None, 10)?;
         let raw = self

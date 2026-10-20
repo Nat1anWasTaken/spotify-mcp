@@ -4,8 +4,28 @@
 use crate::{Error, Result};
 
 /// A parsed reference: the item kind (if the input named one) and its ID.
+/// Both are checked to be plain tokens, since they end up in Web API paths
+/// and query strings.
 fn parse(input: &str) -> Result<(Option<String>, String)> {
     let input = input.trim();
+    let (kind, id) = parse_parts(input)?;
+    let valid_kind = kind
+        .as_deref()
+        .is_none_or(|k| !k.is_empty() && k.chars().all(|c| c.is_ascii_lowercase()));
+    // Base62 item IDs, and user IDs, which may also hold `.`, `_` and `-`.
+    let valid_id = !id.starts_with('.')
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
+    if !valid_kind || !valid_id {
+        return Err(Error::InvalidArgument(format!(
+            "`{input}` is not a Spotify ID, URI or link"
+        )));
+    }
+    Ok((kind, id))
+}
+
+fn parse_parts(input: &str) -> Result<(Option<String>, String)> {
     if input.is_empty() {
         return Err(Error::InvalidArgument("an ID must not be empty".into()));
     }
@@ -49,11 +69,6 @@ fn parse(input: &str) -> Result<(Option<String>, String)> {
                 "`{input}` is not a link to a Spotify item"
             ))),
         };
-    }
-    if input.contains([':', '/', '?', '#', ' ']) {
-        return Err(Error::InvalidArgument(format!(
-            "`{input}` is not a Spotify ID, URI or link"
-        )));
     }
     Ok((None, input.to_owned()))
 }
@@ -101,6 +116,26 @@ mod tests {
     use super::*;
 
     const ID: &str = "4uLU6hMCjMI75M1A2tKUQC";
+
+    #[test]
+    fn rejects_ids_that_would_escape_their_path() {
+        for input in [
+            "spotify:track:../me/player/recently-played?",
+            "spotify:track:abc?x=1",
+            "spotify:track:a,b",
+            "spotify:../me:abc",
+            "https://open.spotify.com/track/..%2Fme",
+            "https://open.spotify.com/track/a%3Fb",
+            "..",
+            "a/b",
+            "a b",
+            "a,b",
+        ] {
+            assert!(id(input, "track").is_err(), "{input}");
+            assert!(uri(input, &["track"]).is_err(), "{input}");
+        }
+        assert_eq!(id("spotify:user:jo.hn_d-oe", "user").unwrap(), "jo.hn_d-oe");
+    }
 
     #[test]
     fn accepts_ids_uris_and_links() {

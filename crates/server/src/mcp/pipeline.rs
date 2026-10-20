@@ -61,8 +61,8 @@ fn internal_error(err: sqlx::Error) -> ErrorData {
 /// What the agent is told when Spotify no longer accepts the user's tokens.
 pub fn relink_message(state: &AppState) -> String {
     format!(
-        "The user's Spotify sign-in has expired or was revoked. Ask the user to sign in with \
-         Spotify again at {}/ and then try again.",
+        "The user's Spotify sign-in has expired or was revoked, or lacks permissions these \
+         tools need. Ask the user to sign in with Spotify again at {}/ and then try again.",
         state.config.public_url
     )
 }

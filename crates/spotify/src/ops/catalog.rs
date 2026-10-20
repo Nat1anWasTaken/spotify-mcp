@@ -7,7 +7,7 @@
 use futures::{StreamExt, TryStreamExt, stream};
 use serde_json::{Value, json};
 
-use super::helpers::{count, market, paging};
+use super::helpers::{market, paging};
 use crate::{
     Account, Error, Result, compact, ids,
     types::{ArtistAlbumsRequest, IdsRequest, PagedIdRequest},
@@ -28,7 +28,6 @@ impl Account {
         collection: &str,
         map: fn(&Value) -> Value,
     ) -> Result<Value> {
-        count("ids", &request.ids, 1, MAX_IDS)?;
         let ids = ids::ids(&request.ids, kind, MAX_IDS)?;
         let market = market(request.market.as_deref())?;
         let items: Vec<Value> = stream::iter(ids)
