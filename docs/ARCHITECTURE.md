@@ -157,38 +157,27 @@ The effect column is the `Effect` passed to `Tool::new`: `R` Read,
 | group | tool | request | effect |
 | --- | --- | --- | --- |
 | users | get_me | NoParams | R |
-| users | get_user_profile | UserRequest { user_id } | R |
-| search | search | SearchRequest { query, types, market?, limit?, offset? } | R |
-| catalog | get_tracks, get_albums, get_artists, get_shows, get_episodes, get_audiobooks, get_chapters | IdsRequest { ids, market? } | R |
-| catalog | get_album_tracks, get_show_episodes, get_audiobook_chapters | PagedIdRequest { id, market?, limit?, offset? } | R |
-| catalog | get_artist_albums | ArtistAlbumsRequest { id, include_groups?, market?, limit?, offset? } | R |
-| catalog | get_artist_top_tracks | ArtistTopTracksRequest { id, market? } | R |
-| catalog | list_new_releases | PageRequest { limit?, offset? } | R |
-| catalog | list_categories | CategoriesRequest { locale?, limit?, offset? } | R |
-| catalog | get_category | CategoryRequest { id, locale? } | R |
-| catalog | list_markets | NoParams | R |
-| library | get_saved | SavedRequest { kind, market?, limit?, offset? } | R |
-| library | check_saved | LibraryRequest { kind, ids } | R |
+| search | search | SearchRequest { query, types, market?, limit? (1–10, default 5), offset? (0–1000) } | R |
+| catalog | get_tracks, get_albums, get_artists, get_shows, get_episodes, get_audiobooks, get_chapters | IdsRequest { ids (1–10), market? } | R |
+| catalog | get_album_tracks, get_show_episodes, get_audiobook_chapters | PagedIdRequest { id, market?, limit? (1–50), offset? } | R |
+| catalog | get_artist_albums | ArtistAlbumsRequest { id, include_groups?, market?, limit? (1–10), offset? } | R |
+| library | get_saved | SavedRequest { kind: track\|album\|episode\|show\|audiobook, market?, limit?, offset? } | R |
+| library | check_saved | LibraryRequest { kind, ids (1–40) } | R |
 | library | save_to_library | LibraryRequest | I |
 | library | remove_from_library | LibraryRequest | D |
 | follow | get_followed_artists | FollowedArtistsRequest { after?, limit? } | R |
-| follow | check_following | FollowRequest { kind: artist\|user, ids } | R |
-| follow | follow / unfollow | FollowRequest | I |
-| follow | follow_playlist | FollowPlaylistRequest { playlist_id, public? } | I |
-| follow | unfollow_playlist | PlaylistRequest { playlist_id } | D |
 | personalization | get_top_items | TopItemsRequest { kind: artists\|tracks, time_range?, limit?, offset? } | R |
 | personalization | get_recently_played | RecentlyPlayedRequest { limit?, after?, before? } | R |
-| playlists | list_my_playlists | PageRequest | R |
-| playlists | list_user_playlists | UserPlaylistsRequest { user_id, limit?, offset? } | R |
+| playlists | list_my_playlists | PageRequest { limit?, offset? } | R |
 | playlists | get_playlist | GetPlaylistRequest { playlist_id, market? } | R |
 | playlists | get_playlist_items | PlaylistItemsRequest { playlist_id, market?, limit?, offset? } | R |
-| playlists | get_playlist_cover | PlaylistRequest | R |
+| playlists | get_playlist_cover | PlaylistRequest { playlist_id } | R |
 | playlists | create_playlist | CreatePlaylistRequest { name, description?, public?, collaborative? } | A |
 | playlists | update_playlist_details | UpdatePlaylistRequest { playlist_id, name?, description?, public?, collaborative? } | I |
-| playlists | add_playlist_items | AddItemsRequest { playlist_id, uris, position? } | A |
+| playlists | add_playlist_items | AddItemsRequest { playlist_id, uris (1–100), position? } | A |
 | playlists | reorder_playlist_items | ReorderItemsRequest { playlist_id, range_start, insert_before, range_length?, snapshot_id? } | A |
-| playlists | remove_playlist_items | RemoveItemsRequest { playlist_id, uris, snapshot_id? } | D |
-| playlists | replace_playlist_items | ReplaceItemsRequest { playlist_id, uris } | D |
+| playlists | remove_playlist_items | RemoveItemsRequest { playlist_id, uris (1–100), snapshot_id? } | D |
+| playlists | replace_playlist_items | ReplaceItemsRequest { playlist_id, uris (0–100) } | D |
 | playlists | upload_playlist_cover | UploadCoverRequest { playlist_id, jpeg_base64 } (≤ 256 KB) | D |
 | player | get_playback_state, get_currently_playing | MarketRequest { market? } | R |
 | player | list_devices, get_queue | NoParams | R |
@@ -202,16 +191,113 @@ The effect column is the `Effect` passed to `Tool::new`: `R` Read,
 | player | set_volume | VolumeRequest { volume_percent, device_id? } | I |
 | player | add_to_queue | QueueRequest { uri, device_id? } | A |
 
-Endpoints Spotify has deprecated for new apps are not offered:
-recommendations, related artists, audio features and analysis, and featured
-or category playlists. See "Spotify facts" for what was verified, and when.
+Spotify has removed or deprecated some endpoints for development-mode apps,
+so these features are not offered: recommendations, related artists, audio
+features and analysis, featured and category playlists (Nov 2024), and
+(Feb 2026) other users' profiles and playlists, artist top tracks, new
+releases, browse categories and markets. The `get_*` catalog tools fetch
+each ID with the single-item endpoint, because the batch "get several"
+endpoints are gone. Following artists, users and playlists is done with the
+library tools (`kind: artist | user | playlist`), because Spotify merged
+those endpoints into `/me/library`. See "Spotify facts" for details.
 
-## Spotify facts (verified YYYY-MM-DD)
+## Spotify facts (verified 2026-10-20)
 
-_To be filled in by whoever verifies the current Web API reference and
-changelog: endpoint paths that changed, batch limits, dev-mode restrictions,
-error shapes (`{error: {status, message, reason?}}`, the player `reason`
-values), and `Retry-After`._
+Sources: developer.spotify.com Web API reference, the changelogs for
+February, March and May 2026, the "February 2026 Web API Dev Mode Changes"
+migration guide, the quota-modes concept page, and the blog post "Introducing
+refresh token expiration" (2026-06-18).
+
+**Quota modes.** These changes apply to *development mode* apps: new apps
+since 2026-02-11, and existing ones since 2026-03-09. Extended-quota apps are
+unaffected, but since 2025-05-15 Spotify grants extended quota only to
+organizations with 250k MAU or more, so a self-hosted spotify-mcp runs in
+development mode. In development mode:
+- at most 5 users, each added to the app's allowlist in the developer
+  dashboard. A user who isn't on the allowlist can sign in, but every API
+  call they make returns 403.
+- the app owner must have Spotify Premium, or the app stops working.
+- requests from all of a developer's dev-mode apps share a per-account
+  quota, counted in buckets of endpoints. When it's exhausted, Spotify
+  returns `429 {"error":{"message":"Too many requests","reason":"QUOTA_EXCEEDED"}}`.
+
+**Removed for dev mode (Feb 2026), and the replacements we use:**
+- `POST /users/{id}/playlists` is replaced by `POST /me/playlists`.
+- `GET|POST|PUT|DELETE /playlists/{id}/tracks` are replaced by
+  `/playlists/{id}/items`. Delete takes the body
+  `{"items":[{"uri"}], "snapshot_id"?}` (it was `tracks`). The playlist
+  object's `tracks` field is now `items`, and each entry's `track` is now
+  `item`. The client accepts both shapes.
+- The entity-specific endpoints `PUT|DELETE /me/{tracks,albums,episodes,shows,audiobooks}`,
+  `/me/following`, `/playlists/{id}/followers` and their `/contains`
+  variants are replaced by `PUT|DELETE /me/library?uris=` and
+  `GET /me/library/contains?uris=` (at most 40 URIs, comma-separated).
+  The reference lists track, album, episode, show, audiobook, user and
+  playlist URIs, and artist URIs for `/contains`. The migration guide's
+  save example also uses artist URIs. Required scopes:
+  `user-library-*`, `user-follow-*` and `playlist-*`.
+- Removed with no replacement: `GET /tracks`, `/albums`, `/artists`,
+  `/shows`, `/episodes`, `/audiobooks` and `/chapters` (the "several"
+  batches), `GET /artists/{id}/top-tracks`, `GET /markets`,
+  `GET /browse/new-releases`, `GET /browse/categories[/{id}]`,
+  `GET /users/{id}` and `GET /users/{id}/playlists`.
+- Still available: the single-item `GET /{tracks,albums,artists,shows,episodes,audiobooks,chapters}/{id}`,
+  album tracks, artist albums, show episodes, audiobook chapters, search,
+  `GET /me`, `GET /me/{tracks,albums,episodes,shows,audiobooks}`,
+  `GET /me/following?type=artist`, `GET /me/playlists`, `GET /me/top/{type}`,
+  `GET /me/player/recently-played`, every `/me/player*` endpoint,
+  `GET|PUT /playlists/{id}`, and `GET|PUT /playlists/{id}/images`.
+
+**Changed limits:**
+- `GET /search`: `limit` is 0–10 and defaults to 5 (it was 50 and 20).
+  `offset` is at most 1000.
+- `GET /artists/{id}/albums`: `limit` is 1–10 and defaults to 5.
+- Other paged endpoints (album tracks, show episodes, saved items, top
+  items, followed artists, playlist items, my playlists) are still 1–50,
+  default 20.
+- Playlist add, replace and remove: at most 100 items per request.
+
+**Changed visibility:**
+- `GET /playlists/{id}` returns `items` only for playlists the user owns or
+  collaborates on. `GET /playlists/{id}/items` returns 403 for any other
+  playlist.
+- Spotify-owned editorial and algorithmic playlists are not available to
+  new apps (Nov 2024).
+
+**Removed fields** (we never rely on them):
+- album: `album_group`, `label`, `popularity`, `available_markets`
+- artist: `followers`, `popularity`
+- track: `popularity`, `available_markets`, `linked_from`. `external_ids`
+  was restored in March 2026.
+- show and audiobook: `publisher`, `available_markets`
+- user (`/me`): `country`, `email`, `explicit_content`, `followers`,
+  `product`
+
+The user fields matter most. In dev mode, `Profile.email`, `country` and
+`product` are usually `None`. May 2026 added `account_id` to `/me`, a
+stable pseudonymous ID that Spotify recommends over `id` for linking.
+
+**Tokens.** Since 2026-06-18 for new apps, and 2026-07-20 for existing
+ones, refresh tokens expire 6 months after the user's original
+authorization. Refreshing does not extend that. On expiry, `/api/token`
+returns `400 {"error":"invalid_grant"}`, which we map to
+`Error::InvalidGrant`. No expiry field is returned, so the server must
+record when the user authorized and ask them to sign in again before 6
+months pass.
+
+**Error shapes.**
+- Web API errors look like `{"error":{"status","message","reason"?}}`. The
+  player uses these `reason`s: `NO_PREV_TRACK`, `NO_NEXT_TRACK`,
+  `NO_SPECIFIC_TRACK`, `ALREADY_PAUSED`, `NOT_PAUSED`,
+  `NOT_PLAYING_LOCALLY`, `NOT_PLAYING_TRACK`, `NOT_PLAYING_CONTEXT`,
+  `ENDLESS_CONTEXT`, `CONTEXT_DISALLOW`, `ALREADY_PLAYING`,
+  `RATE_LIMITED`, `REMOTE_CONTROL_DISALLOW`, `DEVICE_NOT_CONTROLLABLE`,
+  `VOLUME_CONTROL_DISALLOW`, `NO_ACTIVE_DEVICE`, `PREMIUM_REQUIRED` and
+  `UNKNOWN`.
+- 429 responses carry `Retry-After` in seconds.
+- Token endpoint errors follow RFC 6749: `{"error","error_description"}`.
+- `GET /me/player` and `/me/player/currently-playing` return 204 with an
+  empty body when nothing is playing.
 
 ## Conventions
 
