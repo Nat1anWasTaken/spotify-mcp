@@ -156,7 +156,9 @@ last page.
 
 ## Tools
 
-The `group` column is the `spotify::ops` module and the dashboard grouping.
+The `group` column is the `spotify::ops` module and the dashboard grouping
+(`get_followed_artists`, from `ops/follow.rs`, is grouped with the library).
+The registry lists the tools in this order.
 The effect column is the `Effect` passed to `Tool::new`: `R` Read,
 `A` Additive, `I` Idempotent, `D` Destructive.
 
@@ -168,10 +170,10 @@ The effect column is the `Effect` passed to `Tool::new`: `R` Read,
 | catalog | get_album_tracks, get_show_episodes, get_audiobook_chapters | PagedIdRequest { id, market?, limit? (1–50), offset? } | R |
 | catalog | get_artist_albums | ArtistAlbumsRequest { id, include_groups?, market?, limit? (1–10), offset? } | R |
 | library | get_saved | SavedRequest { kind: track\|album\|episode\|show\|audiobook, market?, limit?, offset? } | R |
+| library | get_followed_artists | FollowedArtistsRequest { after?, limit? (1–50) } | R |
 | library | check_saved | LibraryRequest { kind, ids (1–40) } | R |
 | library | save_to_library | LibraryRequest | I |
 | library | remove_from_library | LibraryRequest | D |
-| follow | get_followed_artists | FollowedArtistsRequest { after?, limit? } | R |
 | personalization | get_top_items | TopItemsRequest { kind: artists\|tracks, time_range?, limit?, offset? } | R |
 | personalization | get_recently_played | RecentlyPlayedRequest { limit?, after?, before? } | R |
 | playlists | list_my_playlists | PageRequest { limit?, offset? } | R |
