@@ -38,6 +38,7 @@ mod tests {
                 "title": "Get my profile",
                 "description": tools[0]["description"],
                 "kind": "read",
+                "destructive": false,
                 "group": "users",
             })
         );

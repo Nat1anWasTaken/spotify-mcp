@@ -462,17 +462,21 @@ static TOOLS: LazyLock<Vec<Tool>> = LazyLock::new(|| {
             Read,
             "Get playback state",
             "What is playing and where: device, progress, shuffle and repeat state, context \
-             and item. The result is just \"Done.\" when nothing is playing.",
-            |a: Account, r: MarketRequest| async move { a.get_playback_state(r).await },
+             and item. `{\"is_playing\": false, \"item\": null}` when nothing is playing.",
+            |a: Account, r: MarketRequest| async move {
+                a.get_playback_state(r).await.map(nothing_playing)
+            },
         ),
         Tool::new(
             "player",
             "get_currently_playing",
             Read,
             "Get the current track",
-            "The track or episode playing now and its progress. The result is just \"Done.\" \
-             when nothing is playing.",
-            |a: Account, r: MarketRequest| async move { a.get_currently_playing(r).await },
+            "The track or episode playing now and its progress. \
+             `{\"is_playing\": false, \"item\": null}` when nothing is playing.",
+            |a: Account, r: MarketRequest| async move {
+                a.get_currently_playing(r).await.map(nothing_playing)
+            },
         ),
         Tool::new(
             "player",
@@ -584,6 +588,15 @@ static TOOLS: LazyLock<Vec<Tool>> = LazyLock::new(|| {
         ),
     ]
 });
+
+/// Spotify answers "nothing is playing" with an empty body, which would read
+/// as "Done."; say it explicitly instead.
+fn nothing_playing(value: Value) -> Value {
+    match value {
+        Value::Null => serde_json::json!({ "is_playing": false, "item": null }),
+        value => value,
+    }
+}
 
 pub fn all() -> impl Iterator<Item = &'static Tool> {
     TOOLS.iter()

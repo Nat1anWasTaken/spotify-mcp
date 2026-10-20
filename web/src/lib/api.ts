@@ -45,7 +45,6 @@ export type ToolGroup =
   | "search"
   | "catalog"
   | "library"
-  | "follow"
   | "personalization"
   | "playlists"
   | "player"

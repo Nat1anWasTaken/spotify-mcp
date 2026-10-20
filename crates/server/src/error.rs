@@ -21,8 +21,6 @@ pub enum AppError {
     NotFound,
     #[error("{0}")]
     BadRequest(String),
-    #[error("{0}")]
-    Conflict(String),
     /// Spotify failed or refused the request.
     #[error("{0}")]
     Spotify(String),
@@ -57,7 +55,6 @@ impl IntoResponse for AppError {
             Self::Forbidden(_) => (StatusCode::FORBIDDEN, "forbidden"),
             Self::NotFound => (StatusCode::NOT_FOUND, "not_found"),
             Self::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
-            Self::Conflict(_) => (StatusCode::CONFLICT, "conflict"),
             Self::Spotify(_) => (StatusCode::BAD_GATEWAY, "spotify_error"),
             Self::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal"),
         };

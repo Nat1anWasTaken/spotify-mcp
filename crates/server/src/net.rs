@@ -13,10 +13,7 @@ use reqwest::{
 use url::{Host, Url};
 
 pub struct Fetched {
-    /// Where the body came from, after any redirects.
-    pub url: Url,
     pub body: Vec<u8>,
-    pub content_type: Option<String>,
 }
 
 /// What to do with a body longer than `max_bytes`.
@@ -79,12 +76,6 @@ pub async fn fetch(
         bail!("response is larger than {max_bytes} bytes");
     }
 
-    let url = response.url().clone();
-    let content_type = response
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .map(str::to_owned);
     let mut body = Vec::new();
     while let Some(chunk) = response.chunk().await? {
         if body.len() + chunk.len() > max_bytes {
@@ -97,11 +88,7 @@ pub async fn fetch(
         }
         body.extend_from_slice(&chunk);
     }
-    Ok(Fetched {
-        url,
-        body,
-        content_type,
-    })
+    Ok(Fetched { body })
 }
 
 /// Only `http(s)` URLs, and no IP literal that isn't public: literals never

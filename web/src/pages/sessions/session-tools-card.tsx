@@ -29,7 +29,6 @@ const TOOL_GROUPS: Record<ToolGroup, string> = {
   catalog: "Catalog",
   playlists: "Playlists",
   library: "Library",
-  follow: "Follows",
   personalization: "Top items & history",
   users: "Profiles",
 }

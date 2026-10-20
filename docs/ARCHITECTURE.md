@@ -369,7 +369,7 @@ type ToolInfo = {
   description: string
   kind: "read" | "write"
   destructive: boolean            // write that removes or replaces something
-  group: "users" | "search" | "catalog" | "library" | "follow" | "personalization" | "playlists" | "player"
+  group: "users" | "search" | "catalog" | "library" | "personalization" | "playlists" | "player"
 }
 
 type ToolCallStatus = "running" | "ok" | "error" | "denied"
