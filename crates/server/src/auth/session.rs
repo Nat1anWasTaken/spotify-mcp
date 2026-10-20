@@ -1,6 +1,9 @@
+//! Dashboard sessions: the `spmcp_session` cookie (stored hashed), the
+//! [`CurrentUser`] extractor and logging out.
+
 use axum::{
     extract::{FromRequestParts, OptionalFromRequestParts, State},
-    http::{StatusCode, request::Parts},
+    http::{HeaderMap, StatusCode, header, request::Parts},
 };
 use axum_extra::extract::{CookieJar, cookie::Cookie};
 use chrono::{TimeDelta, Utc};
@@ -83,10 +86,19 @@ pub async fn start(db: &PgPool, config: &Config, user_id: Uuid) -> sqlx::Result<
     ))
 }
 
+/// `POST /auth/logout`. Like the API's CSRF guard, refuses a request whose
+/// `Origin` names another site.
 pub async fn logout(
     State(state): State<AppState>,
+    headers: HeaderMap,
     jar: CookieJar,
 ) -> Result<(CookieJar, StatusCode), AppError> {
+    if headers
+        .get(header::ORIGIN)
+        .is_some_and(|origin| !origin.to_str().is_ok_and(|o| state.config.is_own_origin(o)))
+    {
+        return Err(AppError::Forbidden("cross-origin request rejected".into()));
+    }
     if let Some(cookie) = jar.get(COOKIE) {
         sqlx::query("DELETE FROM dashboard_sessions WHERE token_hash = $1")
             .bind(hash_token(cookie.value()))

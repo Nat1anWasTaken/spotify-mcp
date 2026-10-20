@@ -51,10 +51,32 @@ async fn me(State(state): State<AppState>, user: CurrentUser) -> AppResult<Json<
 }
 
 /// `GET /api/now-playing`: the user's current playback, for the overview.
-/// `null` when nothing is playing.
+/// `null` when nothing is playing or the user has no usable link. Like a
+/// tool call, a token Spotify rejects early is refreshed once.
 async fn now_playing(State(state): State<AppState>, user: CurrentUser) -> AppResult<Json<Value>> {
-    let _ = (state, user);
-    todo!("auth/links agent")
+    let Some(linked) = links::account(&state, user.id).await? else {
+        return Ok(Json(Value::Null));
+    };
+    let mut token_hash = linked.token_hash;
+    let mut outcome = linked.account.now_playing().await;
+    if matches!(outcome, Err(spotify::Error::Unauthorized)) {
+        let Some(fresh) = links::refresh(&state, user.id, &token_hash).await? else {
+            return Ok(Json(Value::Null));
+        };
+        token_hash = fresh.token_hash;
+        outcome = fresh.account.now_playing().await;
+    }
+    match outcome {
+        Ok(playing) => {
+            links::mark_ok(&state.db, user.id).await;
+            Ok(Json(playing))
+        }
+        Err(err @ (spotify::Error::Unauthorized | spotify::Error::InvalidGrant)) => {
+            links::mark_invalid(&state.db, user.id, &token_hash).await;
+            Err(err.into())
+        }
+        Err(err) => Err(err.into()),
+    }
 }
 
 /// CSRF defence alongside `SameSite=Lax` cookies: mutating requests must come
@@ -173,5 +195,128 @@ mod tests {
         assert_eq!(ok.status, StatusCode::OK);
         let delete = send(&app, dashboard_request(Method::DELETE, &uri, &cookie, None)).await;
         assert_eq!(delete.status, StatusCode::NO_CONTENT);
+    }
+
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn me_shows_the_link_status(db: PgPool) {
+        let spotify = testing::MockSpotify::start().await;
+        let state = spotify.state(db.clone());
+        let (user_id, cookie) = testing::sign_in(&state, 7).await;
+        crate::links::store_linked(&state, user_id, &spotify.tokens())
+            .await
+            .unwrap();
+        let app = crate::app(state);
+
+        let me = send(
+            &app,
+            dashboard_request(Method::GET, "/api/me", &cookie, None),
+        )
+        .await
+        .json();
+        let link = &me["link"];
+        assert_eq!(link["linked"], true);
+        assert_eq!(link["status"], "ok");
+        assert_eq!(
+            link["scopes"].as_array().unwrap().len(),
+            spotify::oauth::SCOPES.len()
+        );
+        assert_eq!(link["missing_scopes"], json!([]));
+        assert!(link["expires_at"].is_string());
+        assert!(link["last_ok_at"].is_string());
+        assert_eq!(link["last_error"], json!(null));
+
+        sqlx::query(
+            "UPDATE spotify_links SET status = 'needs_relink', last_error = 'revoked',
+                    scopes = ARRAY['user-read-private']",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        let me = send(
+            &app,
+            dashboard_request(Method::GET, "/api/me", &cookie, None),
+        )
+        .await
+        .json();
+        assert_eq!(me["link"]["status"], "needs_relink");
+        assert_eq!(me["link"]["last_error"], "revoked");
+        assert!(
+            me["link"]["missing_scopes"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("user-modify-playback-state"))
+        );
+    }
+
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn now_playing(db: PgPool) {
+        use std::sync::atomic::Ordering;
+
+        let spotify = testing::MockSpotify::start().await;
+        let state = spotify.state(db.clone());
+        let (user_id, cookie) = testing::sign_in(&state, 7).await;
+        let app = crate::app(state.clone());
+        let now_playing = || async {
+            send(
+                &app,
+                dashboard_request(Method::GET, "/api/now-playing", &cookie, None),
+            )
+            .await
+        };
+
+        // Not linked.
+        let response = now_playing().await;
+        assert_eq!(response.status, StatusCode::OK);
+        assert_eq!(response.json(), json!(null));
+
+        // Linked, nothing playing.
+        crate::links::store_linked(&state, user_id, &spotify.tokens())
+            .await
+            .unwrap();
+        assert_eq!(now_playing().await.json(), json!(null));
+
+        *spotify.mock.playback.lock().unwrap() = Some(json!({
+            "is_playing": true,
+            "progress_ms": 61_000,
+            "device": { "name": "Desk", "type": "Computer", "volume_percent": 40 },
+            "item": {
+                "type": "track", "uri": "spotify:track:1", "name": "Song", "duration_ms": 200_000,
+                "artists": [{ "name": "Band", "uri": "spotify:artist:1" }],
+                "album": { "name": "Record", "images": [{ "url": "https://i.scdn.co/image/a" }] },
+            },
+        }));
+        let playing = now_playing().await.json();
+        assert_eq!(playing["is_playing"], true);
+        assert_eq!(playing["progress"], "1:01");
+        assert_eq!(playing["device"]["name"], "Desk");
+        assert_eq!(playing["item"]["name"], "Song");
+        assert_eq!(playing["item"]["duration"], "3:20");
+
+        // Spotify rejects the token early: refreshed once, then retried.
+        spotify
+            .mock
+            .rejected
+            .lock()
+            .unwrap()
+            .insert("access-1".into());
+        let playing = now_playing().await;
+        assert_eq!(playing.status, StatusCode::OK);
+        assert_eq!(playing.json()["item"]["name"], "Song");
+        assert_eq!(spotify.mock.refreshes.load(Ordering::SeqCst), 1);
+
+        // Rejected even after refreshing: an upstream error, and the link
+        // (holding the refreshed token) needs a re-link.
+        spotify
+            .mock
+            .rejected
+            .lock()
+            .unwrap()
+            .extend(["access-2".to_owned(), "access-3".to_owned()]);
+        let failed = now_playing().await;
+        assert_eq!(failed.status, StatusCode::BAD_GATEWAY);
+        assert_eq!(failed.json()["error"], "spotify_error");
+        let link = crate::links::status(&db, user_id).await.unwrap();
+        assert_eq!(link.status, Some(crate::links::State::NeedsRelink));
+        assert_eq!(now_playing().await.json(), json!(null));
     }
 }
