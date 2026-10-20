@@ -32,6 +32,9 @@ CREATE TABLE spotify_links (
     token_hash            text NOT NULL,
     scopes                text[] NOT NULL,
     expires_at            timestamptz NOT NULL,
+    -- The last sign-in. Refresh tokens expire 6 months after it, however
+    -- often they are used, so refreshing never moves it.
+    authorized_at         timestamptz NOT NULL,
     status                text NOT NULL DEFAULT 'ok'
                               CHECK (status IN ('ok', 'renewing', 'needs_relink')),
     last_ok_at            timestamptz,

@@ -108,6 +108,9 @@ enum Failure {
     Denied,
     /// The attempt is gone, or this browser did not start it.
     Expired,
+    /// Spotify answered `/me` with 403: a development-mode app serves only
+    /// the users on its allowlist.
+    NotAllowed,
     /// Spotify failed.
     Spotify,
 }
@@ -117,6 +120,7 @@ impl Failure {
         let code = match self {
             Self::Denied => "denied",
             Self::Expired => "expired",
+            Self::NotAllowed => "not_allowed",
             Self::Spotify => "spotify",
         };
         Redirect::to(&format!("/login?error={code}"))
@@ -152,6 +156,10 @@ pub async fn callback(
 
     let user_id = match sign_in(&state, &attempt, code).await {
         Ok(user_id) => user_id,
+        Err(SignInError::Spotify(spotify::Error::Forbidden(message))) => {
+            tracing::warn!(%message, "Spotify refused /me: not on the app's allowlist?");
+            return Ok((jar, Failure::NotAllowed.redirect()).into_response());
+        }
         Err(SignInError::Spotify(err)) => {
             tracing::warn!(error = %err, "Spotify sign-in failed");
             return Ok((jar, Failure::Spotify.redirect()).into_response());
@@ -193,7 +201,8 @@ fn internal(err: impl Into<anyhow::Error>) -> SignInError {
 }
 
 /// Exchanges the code, loads the profile, upserts the user and stores the
-/// tokens. Returns the user's ID.
+/// tokens. Returns the user's ID. Profile fields `/me` leaves out keep their
+/// stored values.
 async fn sign_in(state: &AppState, attempt: &Attempt, code: &str) -> Result<Uuid, SignInError> {
     let verifier = sealed::open(
         &state.config.encryption_key,
@@ -218,11 +227,11 @@ async fn sign_in(state: &AppState, attempt: &Attempt, code: &str) -> Result<Uuid
         "INSERT INTO users (spotify_id, display_name, email, avatar_url, product, country)
          VALUES ($1, $2, $3, $4, $5, $6)
          ON CONFLICT (spotify_id) DO UPDATE SET
-             display_name = EXCLUDED.display_name,
-             email = EXCLUDED.email,
-             avatar_url = EXCLUDED.avatar_url,
-             product = EXCLUDED.product,
-             country = EXCLUDED.country,
+             display_name = COALESCE(EXCLUDED.display_name, users.display_name),
+             email = COALESCE(EXCLUDED.email, users.email),
+             avatar_url = COALESCE(EXCLUDED.avatar_url, users.avatar_url),
+             product = COALESCE(EXCLUDED.product, users.product),
+             country = COALESCE(EXCLUDED.country, users.country),
              last_login_at = now()
          RETURNING id",
     )
@@ -511,6 +520,24 @@ mod tests {
     }
 
     #[sqlx::test(migrations = "../../migrations")]
+    async fn users_off_the_allowlist_are_not_allowed(db: PgPool) {
+        let spotify = MockSpotify::start().await;
+        let app = crate::app(spotify.state(db.clone()));
+        spotify
+            .mock
+            .forbid_me
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+
+        let (_, oauth_state, cookie) = start(&app, "/", None).await;
+        let refused = callback(&app, &format!("code=c&state={oauth_state}"), Some(&cookie)).await;
+        assert_eq!(refused.status, StatusCode::SEE_OTHER);
+        assert_eq!(refused.location(), "/login?error=not_allowed");
+        assert!(set_cookie(&refused, "spmcp_session").is_none());
+        assert_eq!(count(&db, "users").await, 0);
+        assert_eq!(count(&db, "spotify_links").await, 0);
+    }
+
+    #[sqlx::test(migrations = "../../migrations")]
     async fn signing_in_again_updates_the_same_user(db: PgPool) {
         let spotify = MockSpotify::start().await;
         let app = crate::app(spotify.state(db.clone()));
@@ -531,8 +558,26 @@ mod tests {
             .execute(&db)
             .await
             .unwrap();
+        // Development-mode apps get no email, country or product: the
+        // stored ones stay.
+        sqlx::query("UPDATE users SET email = 'kept@example.test', product = 'free'")
+            .execute(&db)
+            .await
+            .unwrap();
+        spotify
+            .mock
+            .minimal_profile
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         sign_in().await;
 
+        let (email, product, country): (Option<String>, Option<String>, Option<String>) =
+            sqlx::query_as("SELECT email, product, country FROM users")
+                .fetch_one(&db)
+                .await
+                .unwrap();
+        assert_eq!(email.as_deref(), Some("kept@example.test"));
+        assert_eq!(product.as_deref(), Some("free"));
+        assert_eq!(country.as_deref(), Some("TW"));
         assert_eq!(count(&db, "users").await, 1);
         assert_eq!(count(&db, "spotify_links").await, 1);
         assert_eq!(count(&db, "dashboard_sessions").await, 2);

@@ -158,6 +158,12 @@ pub struct Mock {
     pub omit_refresh_token: AtomicBool,
     /// Lifetime of issued access tokens, in seconds.
     pub expires_in: AtomicI64,
+    /// Answer `/v1/me` with 403, as for a user missing from a
+    /// development-mode app's allowlist.
+    pub forbid_me: AtomicBool,
+    /// Leave `email`, `country` and `product` out of `/v1/me`, as Spotify
+    /// does for development-mode apps.
+    pub minimal_profile: AtomicBool,
     /// The Spotify user ID `/v1/me` reports.
     pub user_id: Mutex<String>,
     /// The `/v1/me/player` state; `None` answers `204 No Content`.
@@ -183,6 +189,8 @@ impl MockSpotify {
             invalid_grant: AtomicBool::new(false),
             omit_refresh_token: AtomicBool::new(false),
             expires_in: AtomicI64::new(3600),
+            forbid_me: AtomicBool::new(false),
+            minimal_profile: AtomicBool::new(false),
             user_id: Mutex::new("spotify-user".to_owned()),
             playback: Mutex::new(None),
             rejected: Mutex::default(),
@@ -328,7 +336,28 @@ async fn mock_me(
     if !mock.authorized(&headers) {
         return unauthorized();
     }
+    if mock.forbid_me.load(Ordering::SeqCst) {
+        return (
+            StatusCode::FORBIDDEN,
+            axum::Json(serde_json::json!({
+                "error": {
+                    "status": 403,
+                    "message": "User not registered in the Developer Dashboard",
+                },
+            })),
+        )
+            .into_response();
+    }
     let id = mock.user_id.lock().unwrap().clone();
+    if mock.minimal_profile.load(Ordering::SeqCst) {
+        return axum::Json(serde_json::json!({
+            "id": id,
+            "uri": format!("spotify:user:{id}"),
+            "display_name": format!("User {id}"),
+            "images": [],
+        }))
+        .into_response();
+    }
     axum::Json(serde_json::json!({
         "id": id,
         "uri": format!("spotify:user:{id}"),

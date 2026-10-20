@@ -14,7 +14,7 @@
 use std::sync::Arc;
 
 use anyhow::Context;
-use chrono::{DateTime, TimeDelta, Utc};
+use chrono::{DateTime, Months, TimeDelta, Utc};
 use dashmap::DashMap;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -26,6 +26,10 @@ use crate::{config::Config, crypto::sealed, state::AppState};
 
 /// Refresh access tokens expiring sooner than this.
 pub const REFRESH_MARGIN: TimeDelta = TimeDelta::minutes(5);
+
+/// Spotify refresh tokens expire this long after the user's authorization;
+/// refreshing does not extend it.
+pub const REFRESH_TOKEN_LIFETIME: Months = Months::new(6);
 
 /// `last_ok_at` is bumped at most this often.
 const OK_THROTTLE_SECS: i32 = 60;
@@ -62,6 +66,11 @@ pub struct LinkStatus {
     pub expires_at: Option<DateTime<Utc>>,
     pub last_ok_at: Option<DateTime<Utc>>,
     pub last_error: Option<String>,
+    /// The last Spotify sign-in.
+    pub authorized_at: Option<DateTime<Utc>>,
+    /// When the refresh token expires and the user must sign in again
+    /// (`authorized_at` + [`REFRESH_TOKEN_LIFETIME`]).
+    pub reauthorize_by: Option<DateTime<Utc>>,
 }
 
 /// Hex SHA-256 of a token, to tell tokens apart without unsealing them.
@@ -90,7 +99,8 @@ fn expiry(tokens: &spotify::oauth::Tokens) -> DateTime<Utc> {
     Utc::now() + TimeDelta::seconds(tokens.expires_in.max(0))
 }
 
-/// Stores freshly granted tokens for `user_id`, replacing any before.
+/// Stores freshly granted tokens for `user_id`, replacing any before. This
+/// is a new authorization, so it restarts the refresh token's lifetime.
 pub async fn store_linked(
     state: &AppState,
     user_id: Uuid,
@@ -102,14 +112,16 @@ pub async fn store_linked(
         .context("Spotify granted no refresh token")?;
     sqlx::query(
         "INSERT INTO spotify_links (user_id, access_token_sealed, refresh_token_sealed,
-                                    token_hash, scopes, expires_at, status, last_ok_at)
-         VALUES ($1, $2, $3, $4, $5, $6, 'ok', now())
+                                    token_hash, scopes, expires_at, authorized_at, status,
+                                    last_ok_at)
+         VALUES ($1, $2, $3, $4, $5, $6, now(), 'ok', now())
          ON CONFLICT (user_id) DO UPDATE SET
              access_token_sealed = EXCLUDED.access_token_sealed,
              refresh_token_sealed = EXCLUDED.refresh_token_sealed,
              token_hash = EXCLUDED.token_hash,
              scopes = EXCLUDED.scopes,
              expires_at = EXCLUDED.expires_at,
+             authorized_at = now(),
              status = 'ok',
              last_ok_at = now(),
              last_error = NULL,
@@ -358,9 +370,10 @@ pub async fn status(db: &PgPool, user_id: Uuid) -> sqlx::Result<LinkStatus> {
         expires_at: DateTime<Utc>,
         last_ok_at: Option<DateTime<Utc>>,
         last_error: Option<String>,
+        authorized_at: DateTime<Utc>,
     }
     let row: Option<StatusRow> = sqlx::query_as(
-        "SELECT status, scopes, expires_at, last_ok_at, last_error
+        "SELECT status, scopes, expires_at, last_ok_at, last_error, authorized_at
          FROM spotify_links WHERE user_id = $1",
     )
     .bind(user_id)
@@ -375,6 +388,8 @@ pub async fn status(db: &PgPool, user_id: Uuid) -> sqlx::Result<LinkStatus> {
             expires_at: Some(row.expires_at),
             last_ok_at: row.last_ok_at,
             last_error: row.last_error,
+            authorized_at: Some(row.authorized_at),
+            reauthorize_by: row.authorized_at.checked_add_months(REFRESH_TOKEN_LIFETIME),
         },
         None => LinkStatus {
             linked: false,
@@ -384,6 +399,8 @@ pub async fn status(db: &PgPool, user_id: Uuid) -> sqlx::Result<LinkStatus> {
             expires_at: None,
             last_ok_at: None,
             last_error: None,
+            authorized_at: None,
+            reauthorize_by: None,
         },
     })
 }
@@ -465,9 +482,29 @@ mod tests {
         // The profile works with the new token.
         assert!(linked.account.profile().await.is_ok());
 
+        sqlx::query("UPDATE spotify_links SET authorized_at = now() - interval '30 days'")
+            .execute(&db)
+            .await
+            .unwrap();
+        let authorized_at = super::status(&db, user_id).await.unwrap().authorized_at;
         expire_soon(&db, user_id).await;
         let linked = account(&state, user_id).await.unwrap().unwrap();
         assert_eq!(linked.token_hash, token_hash("access-3"));
+        assert_eq!(
+            super::status(&db, user_id).await.unwrap().authorized_at,
+            authorized_at,
+            "refreshing does not extend the authorization"
+        );
+        // Signing in again does.
+        store_linked(&state, user_id, &spotify.tokens())
+            .await
+            .unwrap();
+        let relinked = super::status(&db, user_id)
+            .await
+            .unwrap()
+            .authorized_at
+            .unwrap();
+        assert!(relinked > Utc::now() - TimeDelta::minutes(1));
         assert_eq!(
             *spotify.mock.refresh_tokens_used.lock().unwrap(),
             ["refresh-1", "refresh-1"],

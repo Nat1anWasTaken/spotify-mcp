@@ -145,6 +145,7 @@ mod tests {
                 "link": {
                     "linked": false, "status": null, "scopes": [], "missing_scopes": [],
                     "expires_at": null, "last_ok_at": null, "last_error": null,
+                    "authorized_at": null, "reauthorize_by": null,
                 },
             })
         );
@@ -224,6 +225,17 @@ mod tests {
         assert!(link["expires_at"].is_string());
         assert!(link["last_ok_at"].is_string());
         assert_eq!(link["last_error"], json!(null));
+        let authorized_at: chrono::DateTime<chrono::Utc> =
+            serde_json::from_value(link["authorized_at"].clone()).unwrap();
+        let reauthorize_by: chrono::DateTime<chrono::Utc> =
+            serde_json::from_value(link["reauthorize_by"].clone()).unwrap();
+        assert!(authorized_at > chrono::Utc::now() - chrono::TimeDelta::minutes(1));
+        assert_eq!(
+            reauthorize_by,
+            authorized_at
+                .checked_add_months(chrono::Months::new(6))
+                .unwrap()
+        );
 
         sqlx::query(
             "UPDATE spotify_links SET status = 'needs_relink', last_error = 'revoked',
