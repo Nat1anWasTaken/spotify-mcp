@@ -8,7 +8,7 @@ sets each connected agent's permissions and shows a log of every tool call.
 The OAuth server for MCP clients, dashboard sessions, per-session
 permissions, the tool pipeline, the call log and the dashboard itself come
 from [mcp-backbone](https://github.com/Nat1anWasTaken/mcp-backbone): the
-`mcp-backbone` crate and the `@nat1anwastaken/mcp-backbone-dashboard`
+`mcp-backbone` crate and the `@nat1an/mcp-backbone-dashboard`
 package. This repository holds what is Spotify's. The framework's own
 documentation covers its parts; this one covers Spotify.
 

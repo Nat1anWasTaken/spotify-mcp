@@ -4,22 +4,22 @@ import {
   Alert,
   AlertDescription,
   AlertTitle,
-} from "@nat1anwastaken/mcp-backbone-dashboard/ui/alert"
+} from "@nat1an/mcp-backbone-dashboard/ui/alert"
 import {
   Avatar,
   AvatarFallback,
   AvatarImage,
-} from "@nat1anwastaken/mcp-backbone-dashboard/ui/avatar"
-import { Badge } from "@nat1anwastaken/mcp-backbone-dashboard/ui/badge"
+} from "@nat1an/mcp-backbone-dashboard/ui/avatar"
+import { Badge } from "@nat1an/mcp-backbone-dashboard/ui/badge"
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@nat1anwastaken/mcp-backbone-dashboard/ui/card"
-import { useSignedInMe } from "@nat1anwastaken/mcp-backbone-dashboard"
-import { initials } from "@nat1anwastaken/mcp-backbone-dashboard"
+} from "@nat1an/mcp-backbone-dashboard/ui/card"
+import { useSignedInMe } from "@nat1an/mcp-backbone-dashboard"
+import { initials } from "@nat1an/mcp-backbone-dashboard"
 
 import type { SpotifyProfile } from "@/lib/types"
 

@@ -6,23 +6,23 @@ import {
   PlayIcon,
 } from "lucide-react"
 
-import { ErrorAlert } from "@nat1anwastaken/mcp-backbone-dashboard"
+import { ErrorAlert } from "@nat1an/mcp-backbone-dashboard"
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@nat1anwastaken/mcp-backbone-dashboard/ui/card"
+} from "@nat1an/mcp-backbone-dashboard/ui/card"
 import {
   Empty,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@nat1anwastaken/mcp-backbone-dashboard/ui/empty"
-import { Progress } from "@nat1anwastaken/mcp-backbone-dashboard/ui/progress"
-import { Skeleton } from "@nat1anwastaken/mcp-backbone-dashboard/ui/skeleton"
+} from "@nat1an/mcp-backbone-dashboard/ui/empty"
+import { Progress } from "@nat1an/mcp-backbone-dashboard/ui/progress"
+import { Skeleton } from "@nat1an/mcp-backbone-dashboard/ui/skeleton"
 import { useNowPlaying } from "@/hooks/use-now-playing"
 import type { NowPlaying } from "@/lib/types"
 

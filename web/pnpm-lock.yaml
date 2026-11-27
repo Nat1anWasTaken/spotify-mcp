@@ -163,13 +163,13 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
-  '@nat1anwastaken/mcp-backbone-dashboard': link:../../mcp-backbone/packages/dashboard
+  '@nat1an/mcp-backbone-dashboard': link:../../mcp-backbone/packages/dashboard
 
 importers:
 
   .:
     dependencies:
-      '@nat1anwastaken/mcp-backbone-dashboard':
+      '@nat1an/mcp-backbone-dashboard':
         specifier: link:../../mcp-backbone/packages/dashboard
         version: link:../../mcp-backbone/packages/dashboard
       '@tanstack/react-query':

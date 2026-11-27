@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 
-import { api } from "@nat1anwastaken/mcp-backbone-dashboard"
+import { api } from "@nat1an/mcp-backbone-dashboard"
 
 import type { NowPlaying } from "@/lib/types"
 

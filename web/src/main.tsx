@@ -1,4 +1,4 @@
-import { mountDashboard } from "@nat1anwastaken/mcp-backbone-dashboard"
+import { mountDashboard } from "@nat1an/mcp-backbone-dashboard"
 
 import "./index.css"
 import { spotifyLinkHealth } from "@/link-health"

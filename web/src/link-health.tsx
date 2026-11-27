@@ -1,6 +1,6 @@
-import type { LinkHealth, Me } from "@nat1anwastaken/mcp-backbone-dashboard"
-import { Button } from "@nat1anwastaken/mcp-backbone-dashboard/ui/button"
-import { formatDate } from "@nat1anwastaken/mcp-backbone-dashboard"
+import type { LinkHealth, Me } from "@nat1an/mcp-backbone-dashboard"
+import { Button } from "@nat1an/mcp-backbone-dashboard/ui/button"
+import { formatDate } from "@nat1an/mcp-backbone-dashboard"
 
 import { reauthorizeState, signInWithSpotify } from "@/lib/spotify"
 import type { LinkStatus } from "@/lib/types"

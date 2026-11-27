@@ -2,14 +2,14 @@ import type { ReactNode } from "react"
 import { TriangleAlertIcon } from "lucide-react"
 
 import { LinkStatusBadge } from "@/components/link-status-badge"
-import { RelativeTime } from "@nat1anwastaken/mcp-backbone-dashboard"
+import { RelativeTime } from "@nat1an/mcp-backbone-dashboard"
 import {
   Alert,
   AlertDescription,
   AlertTitle,
-} from "@nat1anwastaken/mcp-backbone-dashboard/ui/alert"
-import { Badge } from "@nat1anwastaken/mcp-backbone-dashboard/ui/badge"
-import { Button } from "@nat1anwastaken/mcp-backbone-dashboard/ui/button"
+} from "@nat1an/mcp-backbone-dashboard/ui/alert"
+import { Badge } from "@nat1an/mcp-backbone-dashboard/ui/badge"
+import { Button } from "@nat1an/mcp-backbone-dashboard/ui/button"
 import {
   Card,
   CardAction,
@@ -17,10 +17,10 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@nat1anwastaken/mcp-backbone-dashboard/ui/card"
-import { useSignedInMe } from "@nat1anwastaken/mcp-backbone-dashboard"
-import { useNow } from "@nat1anwastaken/mcp-backbone-dashboard"
-import { formatDate } from "@nat1anwastaken/mcp-backbone-dashboard"
+} from "@nat1an/mcp-backbone-dashboard/ui/card"
+import { useSignedInMe } from "@nat1an/mcp-backbone-dashboard"
+import { useNow } from "@nat1an/mcp-backbone-dashboard"
+import { formatDate } from "@nat1an/mcp-backbone-dashboard"
 import { reauthorizeState, signInWithSpotify } from "@/lib/spotify"
 import type { LinkStatus } from "@/lib/types"
 

@@ -6,10 +6,10 @@ import {
   Alert,
   AlertDescription,
   AlertTitle,
-} from "@nat1anwastaken/mcp-backbone-dashboard/ui/alert"
-import { Button } from "@nat1anwastaken/mcp-backbone-dashboard/ui/button"
-import { Spinner } from "@nat1anwastaken/mcp-backbone-dashboard/ui/spinner"
-import { nextPath } from "@nat1anwastaken/mcp-backbone-dashboard"
+} from "@nat1an/mcp-backbone-dashboard/ui/alert"
+import { Button } from "@nat1an/mcp-backbone-dashboard/ui/button"
+import { Spinner } from "@nat1an/mcp-backbone-dashboard/ui/spinner"
+import { nextPath } from "@nat1an/mcp-backbone-dashboard"
 
 import { signInWithSpotify } from "@/lib/spotify"
 

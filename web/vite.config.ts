@@ -1,6 +1,6 @@
 import { resolve } from "node:path"
 
-import { backbone } from "@nat1anwastaken/mcp-backbone-dashboard/vite"
+import { backbone } from "@nat1an/mcp-backbone-dashboard/vite"
 import { defineConfig } from "vite"
 
 export default defineConfig({
