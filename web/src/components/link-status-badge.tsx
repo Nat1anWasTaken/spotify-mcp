@@ -1,7 +1,7 @@
 import type { ComponentProps } from "react"
 
-import { Badge } from "@/components/ui/badge"
-import type { LinkStatus } from "@/lib/api"
+import { Badge } from "@nat1anwastaken/mcp-backbone-dashboard/ui/badge"
+import type { LinkStatus } from "@/lib/types"
 
 type BadgeVariant = ComponentProps<typeof Badge>["variant"]
 

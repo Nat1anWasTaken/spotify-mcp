@@ -1,6 +1,8 @@
 import { useQuery } from "@tanstack/react-query"
 
-import { api, type NowPlaying } from "@/lib/api"
+import { api } from "@nat1anwastaken/mcp-backbone-dashboard"
+
+import type { NowPlaying } from "@/lib/types"
 
 /**
  * What's playing on the user's Spotify account (null when nothing is), polled

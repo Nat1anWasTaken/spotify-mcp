@@ -5,18 +5,21 @@ playlists, library, follows and playback. Users sign in to the dashboard with
 Spotify; that sign-in is also what links their Spotify account. The dashboard
 sets each connected agent's permissions and shows a log of every tool call.
 
-The structure mirrors `~/Developments/telegram-mcp` (OAuth server, per-session
-permissions, dashboard, deployment). The idea that signing in links the
-upstream account comes from `~/Developments/ilearning-mcp`.
+The OAuth server for MCP clients, dashboard sessions, per-session
+permissions, the tool pipeline, the call log and the dashboard itself come
+from [mcp-backbone](https://github.com/Nat1anWasTaken/mcp-backbone): the
+`mcp-backbone` crate and the `@nat1anwastaken/mcp-backbone-dashboard`
+package. This repository holds what is Spotify's. The framework's own
+documentation covers its parts; this one covers Spotify.
 
 Everything is served from one origin (`PUBLIC_URL`):
 
 | Path | Auth | What |
 | --- | --- | --- |
-| `/mcp` | OAuth bearer | MCP streamable HTTP endpoint (stateless, JSON responses) |
-| `/.well-known/*`, `/oauth/*` | none / client auth | OAuth 2.1 authorization server for MCP clients |
-| `/auth/spotify/*`, `/auth/logout` | pre-auth cookie / session cookie | "Continue with Spotify" sign-in |
-| `/api/*` | `spmcp_session` cookie | Dashboard JSON API |
+| `/mcp` | OAuth bearer | MCP streamable HTTP endpoint (the framework) |
+| `/.well-known/*`, `/oauth/*` | none / client auth | OAuth 2.1 authorization server (the framework) |
+| `/auth/spotify/*` | pre-auth cookie | "Continue with Spotify" sign-in |
+| `/auth/logout`, `/api/*` | `spmcp_session` cookie | Dashboard API (the framework's, plus `/api/now-playing`) |
 | everything else | none | Dashboard SPA (`web/dist`) |
 
 ## Crates
@@ -24,15 +27,15 @@ Everything is served from one origin (`PUBLIC_URL`):
 ```
 crates/spotify   Spotify Web API client: OAuth tokens + one Account method per tool.
                  No HTTP serving, MCP, or database code.
-crates/server    axum app (binary `spotify-mcp`)
-  auth/          spotify.rs (sign-in = link), session.rs (CurrentUser, cookie sessions)
-  oauth/         authorization server for MCP clients (copied from telegram-mcp)
-  mcp/           server.rs (ServerHandler), tools.rs (registry), policy.rs,
-                 pipeline.rs, output.rs, log.rs
-  api/           dashboard API
-  links.rs       sealed Spotify tokens, on-demand refresh, link status
-  sessions.rs    agent sessions and their permissions
-  config.rs, crypto.rs, error.rs, net.rs, state.rs, web.rs, testing.rs
+crates/server    the mcp-backbone service (binary `spotify-mcp`)
+  service.rs     the `Service` impl: account, refresh, error classes, routes
+  tools.rs       the tool registry
+  auth.rs        "Continue with Spotify" (sign-in = link)
+  links.rs       Spotify tokens in the framework's link store, on-demand refresh
+  api.rs         /api/now-playing
+  config.rs      Spotify settings; testing.rs, the Spotify mock
+migrations/      legacy/ (the schema before mcp-backbone) and adopt/ (its one-time adoption)
+web/             the dashboard: the package, plus Spotify's login, cards and re-link banner
 ```
 
 ## Spotify sign-in (linking)
@@ -40,8 +43,9 @@ crates/server    axum app (binary `spotify-mcp`)
 1. The SPA sends the browser to `GET /auth/spotify/start?next=/path`. `next`
    must be a same-origin path, for example `/oauth/authorize?...` when the
    user is in the middle of connecting an agent.
-2. The server creates a `link_attempts` row: a random `state` (stored hashed),
-   a PKCE verifier (stored sealed), `next`, and a 10 minute TTL. It sets the
+2. The server starts a sign-in attempt (`mcp_backbone::auth::attempts`): a
+   random `state` (stored hashed), the PKCE verifier (stored sealed), `next`,
+   and a 10 minute TTL. It sets the
    pre-auth cookie `spmcp_link` (path `/auth/spotify`, stored hashed) and
    responds `302` to `accounts.spotify.com/authorize`. The redirect asks for
    `response_type=code`, `redirect_uri={PUBLIC_URL}/auth/spotify/callback`,
@@ -51,7 +55,8 @@ crates/server    axum app (binary `spotify-mcp`)
 3. `GET /auth/spotify/callback?code&state` (or `?error`):
    1. Checks the cookie against the attempt, then deletes the attempt (single use).
    2. Exchanges the code (`Spotify::exchange_code`) and loads `GET /v1/me`.
-   3. Upserts `users` by `spotify_id` and stores the tokens sealed (`links::store_linked`).
+   3. Upserts the user with the Spotify ID as `subject` and `login`, product
+      and country in `profile`, and stores the tokens (`links::store_linked`).
    4. Starts a dashboard session (`spmcp_session`) and `302`s to `next`.
 
    If the user is signed in to the dashboard as a different Spotify user, the
@@ -64,48 +69,36 @@ crates/server    axum app (binary `spotify-mcp`)
 
 ## Tokens and renewal (`links.rs`)
 
-- `spotify_links` holds the access and refresh tokens, each sealed with
-  AES-256-GCM (`crypto::sealed`, AAD = user ID). It also holds `token_hash`
-  (hex SHA-256 of the access token), the granted `scopes`, `expires_at`,
-  `status` (`ok | renewing | needs_relink`), `last_ok_at` and `last_error`.
+- The framework's `links` row holds `token_hash` (hex SHA-256 of the access
+  token), `expires_at`, `status` (`ok | renewing | needs_relink`),
+  `last_ok_at`, `last_error`, and as metadata the granted `scopes` and
+  `authorized_at`. The access and refresh tokens are its sealed secrets
+  `access_token` and `refresh_token` (AES-256-GCM, AAD = user ID).
 - `links::account` runs on every tool call. If the access token expires
-  within 5 minutes, it refreshes it under the user's lock in `RenewLocks`,
-  so concurrent calls refresh only once. Spotify may leave out a new
-  `refresh_token` on refresh; the old one is kept then.
+  within 5 minutes, it refreshes it under the user's lock
+  (`Core::user_lock`), so concurrent calls refresh only once. Spotify may
+  leave out a new `refresh_token` on refresh; the old one is kept then.
 - A refresh that fails with `invalid_grant` sets `needs_relink`, and the
   agent is told to have the user sign in again. A 401 from the Web API
-  before expiry triggers one forced `links::refresh` and a single retry of
-  the call.
+  before expiry makes the framework call `Service::refresh` once and retry
+  the call; `/api/now-playing` goes through `AppState::call`, which does the
+  same.
 - There is no background renewal; refreshing on demand is enough. But since
   2026-06-18 Spotify refresh tokens expire 6 months after the user's
-  original authorization, and refreshing does not extend that. So
-  `spotify_links.authorized_at` records each sign-in, and `LinkStatus`
-  exposes `reauthorize_by` = `authorized_at` + 6 months. The dashboard warns
-  in the last 14 days. After that, `invalid_grant` → `needs_relink` as usual.
+  original authorization, and refreshing does not extend that. So the link's
+  `authorized_at` records each sign-in, and `LinkStatus` exposes
+  `reauthorize_by` = `authorized_at` + 6 months. The dashboard warns in the
+  last 14 days. After that, `invalid_grant` → `needs_relink` as usual.
 
-## Tool calls
+## Migration from before mcp-backbone
 
-`mcp/pipeline.rs` runs each call through these steps:
-
-1. Find the tool. An unknown tool is a protocol error.
-2. Load the session's permissions fresh from the database. A revoked
-   session is a protocol error.
-3. Parse the arguments. Invalid arguments are an error result, logged as `error`.
-4. `policy::check_tool`: the session must be enabled, the tool must be in
-   `allowed_tools`, and a `read_only` session cannot call write tools. A
-   failure is logged as `denied`.
-5. `links::account`. When the user has no usable link, the agent gets the
-   re-link message.
-6. Run the call in a detached `tokio::spawn`, so it finishes and is logged
-   even if the client disconnects. On `Unauthorized`, refresh and retry once.
-7. Log the outcome (`tool_calls`, bounded copies of arguments and result).
-
-`tools/list` shows only the tools `policy::check_tool` allows.
-
-Output: an operation returns `serde_json::Value`, rendered as pretty JSON in
-one text block, or `()` / `Value::Null`, rendered as `"Done."`. Every error
-is a tool result whose text is the `spotify::Error` `Display` message, which
-is written for agents.
+A database created before the framework (`_sqlx_migrations` at version 1)
+is adopted once at startup, in one transaction (`migrations/adopt`): users
+keep their IDs (the Spotify ID becomes `subject`), `spotify_links` becomes a
+link whose secrets are the same sealed bytes, sessions and the call log keep
+every row, and the legacy table is renamed `_legacy_sqlx_migrations`.
+Dashboard cookies stay valid. A test adopts a legacy database and compares
+its schema with a fresh one.
 
 ## `crates/spotify` public API (contract between the crates)
 
@@ -322,139 +315,17 @@ months pass.
 
 ## Dashboard API contract
 
-All JSON, snake_case. `401 {"error":"unauthorized"}` when not signed in.
+The framework's API (`/api/me`, `/api/meta`, sessions, tools, tool calls,
+the consent request) is documented with mcp-backbone. What is Spotify's:
 
-### Shapes
-
-```ts
-type User = {
-  id: string
-  spotify_id: string
-  display_name: string | null
-  email: string | null
-  avatar_url: string | null
-  product: string | null   // "premium" | "free" | ...; usually null: development-mode
-                           // apps no longer get email, country or product from /me
-  country: string | null
-}
-
-type LinkStatus = {
-  linked: boolean
-  status: "ok" | "renewing" | "needs_relink" | null
-  scopes: string[]
-  missing_scopes: string[] // non-empty: sign in again to grant them
-  expires_at: string | null
-  last_ok_at: string | null
-  last_error: string | null
-  authorized_at: string | null   // last Spotify sign-in
-  reauthorize_by: string | null  // authorized_at + 6 months: the refresh token's hard expiry
-}
-
-type AgentSession = {
-  id: string
-  name: string
-  client_id: string
-  client_name: string | null
-  origin: string | null            // e.g. "claude.ai", "chatgpt.com", "localhost"
-  enabled: boolean
-  read_only: boolean
-  allowed_tools: string[] | null   // null = all tools
-  created_at: string
-  last_used_at: string | null
-}
-
-type ToolInfo = {
-  name: string
-  title: string
-  description: string
-  kind: "read" | "write"
-  destructive: boolean            // write that removes or replaces something
-  group: "users" | "search" | "catalog" | "library" | "personalization" | "playlists" | "player"
-}
-
-type ToolCallStatus = "running" | "ok" | "error" | "denied"
-type ToolCall = {
-  id: string
-  session_id: string
-  session_name: string
-  tool: string
-  arguments: Record<string, unknown> // long strings truncated
-  status: ToolCallStatus
-  result: unknown | null
-  error: string | null
-  duration_ms: number | null
-  created_at: string
-}
-
-type OAuthRequest = {
-  client_id: string
-  client_name: string | null
-  client_uri: string | null
-  logo_uri: string | null
-  origin: string | null
-  redirect_uri: string
-  scope: string
-  // Set when re-authorizing a client that already has an active session.
-  existing_session: { name: string; read_only: boolean } | null
-}
-
-// What GET /api/now-playing returns while something plays; null otherwise.
-type NowPlaying = {
-  is_playing: boolean
-  progress: string | null         // "m:ss"
-  progress_ms: number | null
-  device: { name: string; type: string; volume_percent: number | null } | null
-  item: { uri: string; name: string; artists: { name: string; uri: string }[];
-          album: string | null; image: string | null; duration: string;
-          duration_ms: number } | null
-}
-```
-
-### Endpoints
-
-| Method & path | Body | Response |
-| --- | --- | --- |
-| `GET /auth/spotify/start?next=/path` | | 302 to Spotify (browser navigation) |
-| `GET /auth/spotify/callback` | | sets cookie, 302 to `next` (or `/login?error=`) |
-| `POST /auth/logout` | | 204 |
-| `GET /api/me` | | `{ user: User, link: LinkStatus }` |
-| `GET /api/now-playing` | | `NowPlaying \| null` (502 `spotify_error` on upstream failure) |
-| `GET /api/tools` | | `ToolInfo[]` |
-| `GET /api/sessions` | | `AgentSession[]` (active only) |
-| `GET /api/sessions/:id` | | `AgentSession` |
-| `PATCH /api/sessions/:id` | any of `name, enabled, read_only, allowed_tools` | `AgentSession` |
-| `DELETE /api/sessions/:id` | | 204 (revokes tokens, keeps the log) |
-| `GET /api/tool-calls?session_id=&status=&tool=&before=&limit=` | | `{ items: ToolCall[], next_before: string \| null }` (newest first) |
-| `GET /api/tool-calls/:id` | | `ToolCall` |
-| `GET /api/oauth/requests/:id` | | `OAuthRequest` |
-| `POST /api/oauth/requests/:id` | `{ approve: boolean, name?, read_only? }` | `{ redirect_to: string }` |
-
-### OAuth flow (MCP client side)
-
-1. Client hits `/mcp` → `401` with `WWW-Authenticate: Bearer resource_metadata="<PUBLIC_URL>/.well-known/oauth-protected-resource/mcp"`.
-2. The client reads the protected-resource and authorization-server metadata.
-   It registers via `POST /oauth/register`, or uses a CIMD URL as its `client_id`.
-3. Browser → `GET /oauth/authorize?...` (PKCE S256 required). The server
-   stores an `oauth_requests` row and redirects to `/consent/<id>`. If the
-   user isn't signed in, it first redirects to
-   `/login?next=<authorize URL>`, whose "Continue with Spotify" button
-   returns there afterwards.
-4. The consent page shows `GET /api/oauth/requests/:id`. On approve it sends
-   a `POST` and navigates to `redirect_to`.
-5. Client exchanges the code at `POST /oauth/token`, then refreshes with
-   rotating refresh tokens.
-
-### SPA routes
-
-These sit outside the layout:
-- `/login` ("Continue with Spotify", shows `?error=`)
-- `/consent/:id`
-
-These sit inside `AppLayout`, and redirect to `/login?next=` when signed out:
-- `/`: overview with profile, link status / re-link and now playing
-- `/sessions` and `/sessions/:id`: permissions and allowed tools by group
-- `/activity`
-- `/connect`
+- `GET /api/me` → `link` is the `LinkStatus` in `links.rs`: `linked`,
+  `status`, `scopes`, `missing_scopes`, `expires_at`, `last_ok_at`,
+  `last_error`, `authorized_at`, `reauthorize_by`. `user.profile` may hold
+  `product` and `country`.
+- `GET /api/now-playing` → the current playback (`NowPlaying` in
+  `web/src/lib/types.ts`), or `null` when nothing plays or the link is not
+  usable.
+- `GET /auth/spotify/start?next=` and `/auth/spotify/callback`: see above.
 
 ## Config (env)
 
@@ -462,7 +333,7 @@ These sit inside `AppLayout`, and redirect to `/login?next=` when signed out:
 | --- | --- |
 | `PUBLIC_URL` | External origin. Development uses `http://127.0.0.1:5173`, because Spotify refuses `localhost` redirect URIs. |
 | `BIND_ADDR` | Default `0.0.0.0:8080` |
-| `DATABASE_URL` | Postgres 17 (dev: `docker-compose.dev.yml`, port 5444) |
+| `DATABASE_URL` | Postgres 17 (dev: `docker-compose.dev.yml`, port 5445) |
 | `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET` | From the Spotify developer dashboard. Redirect URI: `$PUBLIC_URL/auth/spotify/callback` |
 | `ENCRYPTION_KEY` | 32 bytes base64. Seals the Spotify tokens. |
 | `SPOTIFY_ACCOUNTS_URL`, `SPOTIFY_API_URL` | Optional overrides (tests, mocks) |
