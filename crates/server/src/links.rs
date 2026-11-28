@@ -1,67 +1,55 @@
-//! The user's Spotify tokens: stored sealed, refreshed on demand under a
-//! per-user lock, and the link status the dashboard shows.
+//! The user's Spotify tokens, in the framework's link store: the access and
+//! refresh tokens are its secrets, the granted scopes and the sign-in time
+//! its metadata. Access tokens are refreshed on demand under a per-user lock.
 //!
 //! - [`store_linked`] after a sign-in;
-//! - [`account`] for every tool call, refreshing when the access token
-//!   expires within [`REFRESH_MARGIN`];
+//! - [`account`] for every call, refreshing when the access token expires
+//!   within [`REFRESH_MARGIN`];
 //! - [`refresh`] after Spotify rejected a token early;
-//! - [`mark_ok`] / [`mark_invalid`] with the outcome of a call;
 //! - [`status`] for `/api/me`.
 //!
-//! There is no background renewal: refreshing when a call needs it is
-//! enough. Refresh tokens themselves expire [`REFRESH_TOKEN_LIFETIME`] after
-//! the user's sign-in, which refreshing does not extend; the dashboard warns
-//! ahead of `reauthorize_by`, and after it the refresh fails as
-//! `needs_relink`.
-
-use std::sync::Arc;
+//! The framework records each call's outcome on the link. Refresh tokens
+//! expire [`REFRESH_TOKEN_LIFETIME`] after the user's sign-in, which
+//! refreshing does not extend; the dashboard warns ahead of
+//! `reauthorize_by`, and after it the refresh fails as `needs_relink`.
 
 use anyhow::Context;
 use chrono::{DateTime, Months, TimeDelta, Utc};
-use dashmap::DashMap;
-use serde::Serialize;
-use sha2::{Digest, Sha256};
-use sqlx::{FromRow, PgPool};
-use tokio::sync::Mutex;
+use mcp_backbone::{
+    Core, Linked,
+    links::{LinkRecord, LinkState, LinkStore, NewLink, token_hash},
+};
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 use uuid::Uuid;
-
-use crate::{config::Config, crypto::sealed, state::AppState};
 
 /// Refresh access tokens expiring sooner than this.
 pub const REFRESH_MARGIN: TimeDelta = TimeDelta::minutes(5);
-
 /// Spotify refresh tokens expire this long after the user's authorization;
 /// refreshing does not extend it.
 pub const REFRESH_TOKEN_LIFETIME: Months = Months::new(6);
 
-/// `last_ok_at` is bumped at most this often.
-const OK_THROTTLE_SECS: i32 = 60;
+const ACCESS_TOKEN: &str = "access_token";
+const REFRESH_TOKEN: &str = "refresh_token";
 
-/// One lock per user, so concurrent calls refresh a token once.
-pub type RenewLocks = Arc<DashMap<Uuid, Arc<Mutex<()>>>>;
-
-/// A usable Spotify account and the hash of the access token it acts with,
-/// which [`mark_invalid`] compares so a stale failure cannot condemn a
-/// fresher token.
-pub struct Linked {
-    pub account: spotify::Account,
-    pub token_hash: String,
+/// What the link keeps besides its secrets.
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct Metadata {
+    #[serde(default)]
+    scopes: Vec<String>,
+    /// The last Spotify sign-in.
+    authorized_at: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, sqlx::Type)]
-#[serde(rename_all = "snake_case")]
-#[sqlx(type_name = "text", rename_all = "snake_case")]
-pub enum State {
-    Ok,
-    Renewing,
-    NeedsRelink,
+fn metadata(record: &LinkRecord) -> Metadata {
+    serde_json::from_value(record.metadata.0.clone()).unwrap_or_default()
 }
 
 /// The link as the dashboard shows it (`LinkStatus`).
 #[derive(Debug, Serialize)]
 pub struct LinkStatus {
     pub linked: bool,
-    pub status: Option<State>,
+    pub status: Option<LinkState>,
     pub scopes: Vec<String>,
     /// Scopes the tools need that the user's grant lacks; non-empty means
     /// the user must sign in again.
@@ -76,28 +64,6 @@ pub struct LinkStatus {
     pub reauthorize_by: Option<DateTime<Utc>>,
 }
 
-/// Hex SHA-256 of a token, to tell tokens apart without unsealing them.
-pub fn token_hash(token: &str) -> String {
-    Sha256::digest(token.as_bytes())
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
-}
-
-fn seal(config: &Config, user_id: Uuid, secret: &str) -> anyhow::Result<Vec<u8>> {
-    sealed::seal(
-        &config.encryption_key,
-        user_id.as_bytes(),
-        secret.as_bytes(),
-    )
-}
-
-fn open(config: &Config, user_id: Uuid, sealed_value: &[u8]) -> anyhow::Result<String> {
-    let plain = sealed::open(&config.encryption_key, user_id.as_bytes(), sealed_value)
-        .context("unsealing a Spotify token")?;
-    Ok(String::from_utf8(plain)?)
-}
-
 fn expiry(tokens: &spotify::oauth::Tokens) -> DateTime<Utc> {
     Utc::now() + TimeDelta::seconds(tokens.expires_in.max(0))
 }
@@ -105,7 +71,7 @@ fn expiry(tokens: &spotify::oauth::Tokens) -> DateTime<Utc> {
 /// Stores freshly granted tokens for `user_id`, replacing any before. This
 /// is a new authorization, so it restarts the refresh token's lifetime.
 pub async fn store_linked(
-    state: &AppState,
+    core: &Core,
     user_id: Uuid,
     tokens: &spotify::oauth::Tokens,
 ) -> anyhow::Result<()> {
@@ -113,81 +79,57 @@ pub async fn store_linked(
         .refresh_token
         .as_deref()
         .context("Spotify granted no refresh token")?;
-    sqlx::query(
-        "INSERT INTO spotify_links (user_id, access_token_sealed, refresh_token_sealed,
-                                    token_hash, scopes, expires_at, authorized_at, status,
-                                    last_ok_at)
-         VALUES ($1, $2, $3, $4, $5, $6, now(), 'ok', now())
-         ON CONFLICT (user_id) DO UPDATE SET
-             access_token_sealed = EXCLUDED.access_token_sealed,
-             refresh_token_sealed = EXCLUDED.refresh_token_sealed,
-             token_hash = EXCLUDED.token_hash,
-             scopes = EXCLUDED.scopes,
-             expires_at = EXCLUDED.expires_at,
-             authorized_at = now(),
-             status = 'ok',
-             last_ok_at = now(),
-             last_error = NULL,
-             updated_at = now()",
-    )
-    .bind(user_id)
-    .bind(seal(&state.config, user_id, &tokens.access_token)?)
-    .bind(seal(&state.config, user_id, refresh_token)?)
-    .bind(token_hash(&tokens.access_token))
-    .bind(tokens.scopes())
-    .bind(expiry(tokens))
-    .execute(&state.db)
-    .await?;
-    Ok(())
+    LinkStore::new(core)
+        .put(
+            user_id,
+            &NewLink {
+                secrets: &[
+                    (ACCESS_TOKEN, &tokens.access_token),
+                    (REFRESH_TOKEN, refresh_token),
+                ],
+                token_hash: token_hash(&tokens.access_token),
+                expires_at: Some(expiry(tokens)),
+                metadata: json!({ "scopes": tokens.scopes(), "authorized_at": Utc::now() }),
+            },
+        )
+        .await
 }
 
-#[derive(FromRow)]
-struct Row {
-    access_token_sealed: Vec<u8>,
-    refresh_token_sealed: Vec<u8>,
-    token_hash: String,
-    scopes: Vec<String>,
-    expires_at: DateTime<Utc>,
-    status: State,
+fn is_fresh(record: &LinkRecord) -> bool {
+    record
+        .expires_at
+        .is_some_and(|expires_at| expires_at > Utc::now() + REFRESH_MARGIN)
 }
 
-impl Row {
-    fn is_fresh(&self) -> bool {
-        self.expires_at > Utc::now() + REFRESH_MARGIN
-    }
-
-    /// Whether tools may act with this link at all.
-    fn is_usable(&self) -> bool {
-        self.status != State::NeedsRelink && spotify::oauth::missing_scopes(&self.scopes).is_empty()
-    }
-
-    fn linked(&self, state: &AppState, user_id: Uuid) -> anyhow::Result<Linked> {
-        let token = open(&state.config, user_id, &self.access_token_sealed)?;
-        Ok(Linked {
-            account: state.spotify.account(&token),
-            token_hash: self.token_hash.clone(),
-        })
-    }
+/// Whether tools may act with this link at all.
+fn is_usable(record: &LinkRecord) -> bool {
+    record.is_usable() && spotify::oauth::missing_scopes(&metadata(record).scopes).is_empty()
 }
 
-async fn load(db: &PgPool, user_id: Uuid) -> sqlx::Result<Option<Row>> {
-    sqlx::query_as(
-        "SELECT access_token_sealed, refresh_token_sealed, token_hash, scopes, expires_at, status
-         FROM spotify_links WHERE user_id = $1",
-    )
-    .bind(user_id)
-    .fetch_optional(db)
-    .await
+fn linked(
+    core: &Core,
+    spotify: &spotify::Spotify,
+    record: &LinkRecord,
+) -> anyhow::Result<Linked<spotify::Account>> {
+    let token = record.secret(core, ACCESS_TOKEN)?;
+    Ok(Linked::new(
+        spotify.account(&token),
+        record.token_hash.clone(),
+    ))
 }
 
 /// The user's account, refreshing the access token first when it is about to
 /// expire. `None` when the user has no usable link (never linked, it needs
 /// a re-link, or it lacks scopes the tools need).
-pub async fn account(state: &AppState, user_id: Uuid) -> anyhow::Result<Option<Linked>> {
-    match load(&state.db, user_id).await? {
-        Some(row) if !row.is_usable() => Ok(None),
-        Some(row) if row.is_fresh() => row.linked(state, user_id).map(Some),
-        Some(_) => renew(state, user_id, None).await,
+pub async fn account(
+    core: &Core,
+    spotify: &spotify::Spotify,
+    user_id: Uuid,
+) -> anyhow::Result<Option<Linked<spotify::Account>>> {
+    match LinkStore::new(core).load(user_id).await? {
+        Some(record) if !is_usable(&record) => Ok(None),
+        Some(record) if is_fresh(&record) => linked(core, spotify, &record).map(Some),
+        Some(_) => renew(core, spotify, user_id, None).await,
         None => Ok(None),
     }
 }
@@ -196,11 +138,12 @@ pub async fn account(state: &AppState, user_id: Uuid) -> anyhow::Result<Option<L
 /// one hashed `stale_hash`. `None` when the refresh token was revoked (the
 /// link is then marked `needs_relink`).
 pub async fn refresh(
-    state: &AppState,
+    core: &Core,
+    spotify: &spotify::Spotify,
     user_id: Uuid,
     stale_hash: &str,
-) -> anyhow::Result<Option<Linked>> {
-    renew(state, user_id, Some(stale_hash)).await
+) -> anyhow::Result<Option<Linked<spotify::Account>>> {
+    renew(core, spotify, user_id, Some(stale_hash)).await
 }
 
 /// Refreshes under the user's lock. With `stale_hash`, refreshes unless the
@@ -211,204 +154,110 @@ pub async fn refresh(
 /// Detached, so a caller that goes away (a disconnected client) cannot leave
 /// the link `renewing` or drop the tokens Spotify just issued.
 async fn renew(
-    state: &AppState,
+    core: &Core,
+    spotify: &spotify::Spotify,
     user_id: Uuid,
     stale_hash: Option<&str>,
-) -> anyhow::Result<Option<Linked>> {
-    let state = state.clone();
+) -> anyhow::Result<Option<Linked<spotify::Account>>> {
+    let core = core.clone();
+    let spotify = spotify.clone();
     let stale_hash = stale_hash.map(str::to_owned);
-    tokio::spawn(async move { renew_locked(&state, user_id, stale_hash.as_deref()).await })
+    tokio::spawn(async move { renew_locked(&core, &spotify, user_id, stale_hash.as_deref()).await })
         .await
         .context("refresh task failed")?
 }
 
 async fn renew_locked(
-    state: &AppState,
+    core: &Core,
+    spotify: &spotify::Spotify,
     user_id: Uuid,
     stale_hash: Option<&str>,
-) -> anyhow::Result<Option<Linked>> {
-    let lock = state.renew_locks.entry(user_id).or_default().clone();
+) -> anyhow::Result<Option<Linked<spotify::Account>>> {
+    let lock = core.user_lock(user_id);
     let _guard = lock.lock().await;
-
-    let Some(row) = load(&state.db, user_id).await? else {
+    let store = LinkStore::new(core);
+    let Some(record) = store.load(user_id).await? else {
         return Ok(None);
     };
-    if !row.is_usable() {
+    if !is_usable(&record) {
         return Ok(None);
     }
     let renewed_already = match stale_hash {
-        Some(stale) => row.token_hash != stale,
-        None => row.is_fresh(),
+        Some(stale) => record.token_hash != stale,
+        None => is_fresh(&record),
     };
     if renewed_already {
-        return row.linked(state, user_id).map(Some);
+        return linked(core, spotify, &record).map(Some);
     }
-
-    let refresh_token = open(&state.config, user_id, &row.refresh_token_sealed)?;
-    set_status(&state.db, user_id, &row.token_hash, State::Renewing, None).await?;
-    match state.spotify.refresh(&refresh_token).await {
+    let refresh_token = record.secret(core, REFRESH_TOKEN)?;
+    let old_hash = &record.token_hash;
+    store
+        .set_status(user_id, old_hash, LinkState::Renewing, None)
+        .await?;
+    match spotify.refresh(&refresh_token).await {
         Ok(tokens) => {
-            store_refreshed(state, user_id, &row.token_hash, &tokens).await?;
-            tracing::debug!(%user_id, "refreshed the Spotify access token");
+            // Spotify may leave out a new refresh token and the scopes, in
+            // which case the old ones stay.
             let scopes = match tokens.scopes() {
-                scopes if scopes.is_empty() => row.scopes,
+                scopes if scopes.is_empty() => metadata(&record).scopes,
                 scopes => scopes,
             };
+            let mut secrets = vec![(ACCESS_TOKEN, tokens.access_token.as_str())];
+            if let Some(refresh_token) = tokens.refresh_token.as_deref() {
+                secrets.push((REFRESH_TOKEN, refresh_token));
+            }
+            let renewed = NewLink {
+                secrets: &secrets,
+                token_hash: token_hash(&tokens.access_token),
+                expires_at: Some(expiry(&tokens)),
+                metadata: json!({ "scopes": scopes }),
+            };
+            store.replace(user_id, old_hash, &renewed).await?;
+            tracing::debug!(%user_id, "refreshed the Spotify access token");
             if !spotify::oauth::missing_scopes(&scopes).is_empty() {
                 return Ok(None);
             }
-            Ok(Some(Linked {
-                account: state.spotify.account(&tokens.access_token),
-                token_hash: token_hash(&tokens.access_token),
-            }))
+            Ok(Some(Linked::new(
+                spotify.account(&tokens.access_token),
+                renewed.token_hash,
+            )))
         }
         Err(spotify::Error::InvalidGrant) => {
             tracing::info!(%user_id, "Spotify refresh token revoked; needs re-link");
             let message = "Spotify revoked the authorization. Sign in with Spotify again.";
-            set_status(
-                &state.db,
-                user_id,
-                &row.token_hash,
-                State::NeedsRelink,
-                Some(message),
-            )
-            .await?;
+            store
+                .set_status(user_id, old_hash, LinkState::NeedsRelink, Some(message))
+                .await?;
             Ok(None)
         }
         Err(err) => {
-            set_status(&state.db, user_id, &row.token_hash, State::Ok, None).await?;
+            store
+                .set_status(user_id, old_hash, LinkState::Ok, None)
+                .await?;
             Err(anyhow::Error::new(err).context("refreshing the Spotify access token"))
         }
     }
 }
 
-/// Sets the status of the link while it still holds the token `token_hash`.
-/// `last_error` is replaced only when given.
-async fn set_status(
-    db: &PgPool,
-    user_id: Uuid,
-    token_hash: &str,
-    status: State,
-    last_error: Option<&str>,
-) -> sqlx::Result<()> {
-    sqlx::query(
-        "UPDATE spotify_links
-         SET status = $3, last_error = COALESCE($4, last_error), updated_at = now()
-         WHERE user_id = $1 AND token_hash = $2",
-    )
-    .bind(user_id)
-    .bind(token_hash)
-    .bind(status)
-    .bind(last_error)
-    .execute(db)
-    .await?;
-    Ok(())
-}
-
-/// Replaces the token `old_hash` with refreshed ones. Spotify may leave out
-/// a new refresh token (and the scopes), in which case the old ones stay.
-async fn store_refreshed(
-    state: &AppState,
-    user_id: Uuid,
-    old_hash: &str,
-    tokens: &spotify::oauth::Tokens,
-) -> anyhow::Result<()> {
-    let refresh_token = tokens
-        .refresh_token
-        .as_deref()
-        .map(|token| seal(&state.config, user_id, token))
-        .transpose()?;
-    let scopes = Some(tokens.scopes()).filter(|scopes| !scopes.is_empty());
-    sqlx::query(
-        "UPDATE spotify_links SET
-             access_token_sealed = $3,
-             refresh_token_sealed = COALESCE($4, refresh_token_sealed),
-             token_hash = $5,
-             scopes = COALESCE($6, scopes),
-             expires_at = $7,
-             status = 'ok',
-             last_error = NULL,
-             updated_at = now()
-         WHERE user_id = $1 AND token_hash = $2",
-    )
-    .bind(user_id)
-    .bind(old_hash)
-    .bind(seal(&state.config, user_id, &tokens.access_token)?)
-    .bind(refresh_token)
-    .bind(token_hash(&tokens.access_token))
-    .bind(scopes)
-    .bind(expiry(tokens))
-    .execute(&state.db)
-    .await?;
-    Ok(())
-}
-
-/// Records a successful call (throttled to a write a minute).
-pub async fn mark_ok(db: &PgPool, user_id: Uuid) {
-    let result = sqlx::query(
-        "UPDATE spotify_links SET last_ok_at = now()
-         WHERE user_id = $1
-           AND (last_ok_at IS NULL OR last_ok_at < now() - make_interval(secs => $2))",
-    )
-    .bind(user_id)
-    .bind(OK_THROTTLE_SECS)
-    .execute(db)
-    .await;
-    if let Err(err) = result {
-        tracing::warn!(%user_id, error = ?err, "recording a successful Spotify call");
-    }
-}
-
-/// Marks the link `needs_relink`, if it still holds the token hashed `token_hash`.
-pub async fn mark_invalid(db: &PgPool, user_id: Uuid, token_hash: &str) {
-    let result = sqlx::query(
-        "UPDATE spotify_links
-         SET status = 'needs_relink', last_error = 'Spotify rejected the access token.',
-             updated_at = now()
-         WHERE user_id = $1 AND token_hash = $2",
-    )
-    .bind(user_id)
-    .bind(token_hash)
-    .execute(db)
-    .await;
-    match result {
-        Ok(done) if done.rows_affected() > 0 => {
-            tracing::info!(%user_id, "Spotify token rejected; needs re-link");
+pub async fn status(core: &Core, user_id: Uuid) -> anyhow::Result<LinkStatus> {
+    let record = LinkStore::new(core).load(user_id).await?;
+    Ok(match record {
+        Some(record) => {
+            let metadata = metadata(&record);
+            LinkStatus {
+                linked: true,
+                status: Some(record.status),
+                missing_scopes: spotify::oauth::missing_scopes(&metadata.scopes),
+                scopes: metadata.scopes,
+                expires_at: record.expires_at,
+                last_ok_at: record.last_ok_at,
+                last_error: record.last_error,
+                authorized_at: metadata.authorized_at,
+                reauthorize_by: metadata
+                    .authorized_at
+                    .and_then(|at| at.checked_add_months(REFRESH_TOKEN_LIFETIME)),
+            }
         }
-        Ok(_) => {}
-        Err(err) => tracing::warn!(%user_id, error = ?err, "marking a Spotify link invalid"),
-    }
-}
-
-pub async fn status(db: &PgPool, user_id: Uuid) -> sqlx::Result<LinkStatus> {
-    #[derive(FromRow)]
-    struct StatusRow {
-        status: State,
-        scopes: Vec<String>,
-        expires_at: DateTime<Utc>,
-        last_ok_at: Option<DateTime<Utc>>,
-        last_error: Option<String>,
-        authorized_at: DateTime<Utc>,
-    }
-    let row: Option<StatusRow> = sqlx::query_as(
-        "SELECT status, scopes, expires_at, last_ok_at, last_error, authorized_at
-         FROM spotify_links WHERE user_id = $1",
-    )
-    .bind(user_id)
-    .fetch_optional(db)
-    .await?;
-    Ok(match row {
-        Some(row) => LinkStatus {
-            linked: true,
-            status: Some(row.status),
-            missing_scopes: spotify::oauth::missing_scopes(&row.scopes),
-            scopes: row.scopes,
-            expires_at: Some(row.expires_at),
-            last_ok_at: row.last_ok_at,
-            last_error: row.last_error,
-            authorized_at: Some(row.authorized_at),
-            reauthorize_by: row.authorized_at.checked_add_months(REFRESH_TOKEN_LIFETIME),
-        },
         None => LinkStatus {
             linked: false,
             status: None,
@@ -432,8 +281,29 @@ mod tests {
     use super::*;
     use crate::testing::{self, MockSpotify};
 
+    type State_ = mcp_backbone::AppState<crate::service::SpotifyService>;
+
+    fn client(state: &State_) -> &spotify::Spotify {
+        &state.service.spotify
+    }
+
+    async fn account(
+        state: &State_,
+        user_id: Uuid,
+    ) -> anyhow::Result<Option<Linked<spotify::Account>>> {
+        super::account(state, client(state), user_id).await
+    }
+
+    async fn refresh(
+        state: &State_,
+        user_id: Uuid,
+        stale: &str,
+    ) -> anyhow::Result<Option<Linked<spotify::Account>>> {
+        super::refresh(state, client(state), user_id, stale).await
+    }
+
     /// A signed-in user linked with tokens the mock accepts.
-    async fn linked_user(spotify: &MockSpotify, state: &AppState) -> Uuid {
+    async fn linked_user(spotify: &MockSpotify, state: &State_) -> Uuid {
         let (user_id, _) = testing::sign_in(state, 1).await;
         store_linked(state, user_id, &spotify.tokens())
             .await
@@ -442,49 +312,42 @@ mod tests {
     }
 
     async fn expire_soon(db: &PgPool, user_id: Uuid) {
-        sqlx::query(
-            "UPDATE spotify_links SET expires_at = now() + interval '1 minute' WHERE user_id = $1",
-        )
-        .bind(user_id)
-        .execute(db)
-        .await
-        .unwrap();
+        sqlx::query("UPDATE links SET expires_at = now() + interval '1 minute' WHERE user_id = $1")
+            .bind(user_id)
+            .execute(db)
+            .await
+            .unwrap();
     }
 
-    #[test]
-    fn token_hash_is_hex_sha256() {
-        assert_eq!(
-            token_hash("abc"),
-            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-        );
-    }
-
-    #[sqlx::test(migrations = "../../migrations")]
+    #[sqlx::test(migrations = false)]
     async fn tokens_are_sealed_and_fresh_ones_used_as_is(db: PgPool) {
         let spotify = MockSpotify::start().await;
-        let state = spotify.state(db.clone());
+        let state = spotify.state(db.clone()).await;
         let user_id = linked_user(&spotify, &state).await;
 
-        let (access, refresh): (Vec<u8>, Vec<u8>) =
-            sqlx::query_as("SELECT access_token_sealed, refresh_token_sealed FROM spotify_links")
-                .fetch_one(&db)
-                .await
-                .unwrap();
-        assert!(!access.windows(8).any(|w| w == b"access-1"));
-        assert_eq!(open(&state.config, user_id, &refresh).unwrap(), "refresh-1");
-        // Bound to the user: another user's ID cannot open it.
-        assert!(open(&state.config, Uuid::new_v4(), &access).is_err());
+        let sealed: Vec<Vec<u8>> = sqlx::query_scalar("SELECT sealed FROM link_secrets")
+            .fetch_all(&db)
+            .await
+            .unwrap();
+        assert_eq!(sealed.len(), 2);
+        assert!(
+            sealed
+                .iter()
+                .all(|s| !s.windows(8).any(|w| w == b"access-1"))
+        );
+        let record = LinkStore::new(&state).load(user_id).await.unwrap().unwrap();
+        assert_eq!(record.secret(&state, REFRESH_TOKEN).unwrap(), "refresh-1");
 
         let linked = account(&state, user_id).await.unwrap().unwrap();
-        assert_eq!(linked.token_hash, token_hash("access-1"));
+        assert_eq!(linked.token_hash, Some(token_hash("access-1")));
         assert_eq!(spotify.mock.refreshes.load(Ordering::SeqCst), 0);
         assert!(account(&state, Uuid::new_v4()).await.unwrap().is_none());
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
+    #[sqlx::test(migrations = false)]
     async fn refreshes_near_expiry_and_keeps_an_omitted_refresh_token(db: PgPool) {
         let spotify = MockSpotify::start().await;
-        let state = spotify.state(db.clone());
+        let state = spotify.state(db.clone()).await;
         let user_id = linked_user(&spotify, &state).await;
         spotify
             .mock
@@ -493,23 +356,26 @@ mod tests {
 
         expire_soon(&db, user_id).await;
         let linked = account(&state, user_id).await.unwrap().unwrap();
-        assert_eq!(linked.token_hash, token_hash("access-2"));
-        let status = status(&db, user_id).await.unwrap();
-        assert_eq!(status.status, Some(State::Ok));
+        assert_eq!(linked.token_hash, Some(token_hash("access-2")));
+        let status = status(&state, user_id).await.unwrap();
+        assert_eq!(status.status, Some(LinkState::Ok));
         assert!(status.expires_at.unwrap() > Utc::now() + TimeDelta::minutes(55));
         // The profile works with the new token.
         assert!(linked.account.profile().await.is_ok());
 
-        sqlx::query("UPDATE spotify_links SET authorized_at = now() - interval '30 days'")
-            .execute(&db)
-            .await
-            .unwrap();
-        let authorized_at = super::status(&db, user_id).await.unwrap().authorized_at;
+        sqlx::query(
+            "UPDATE links SET metadata = jsonb_set(metadata, '{authorized_at}',
+                                                 to_jsonb(now() - interval '30 days'))",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        let authorized_at = super::status(&state, user_id).await.unwrap().authorized_at;
         expire_soon(&db, user_id).await;
         let linked = account(&state, user_id).await.unwrap().unwrap();
-        assert_eq!(linked.token_hash, token_hash("access-3"));
+        assert_eq!(linked.token_hash, Some(token_hash("access-3")));
         assert_eq!(
-            super::status(&db, user_id).await.unwrap().authorized_at,
+            super::status(&state, user_id).await.unwrap().authorized_at,
             authorized_at,
             "refreshing does not extend the authorization"
         );
@@ -517,7 +383,7 @@ mod tests {
         store_linked(&state, user_id, &spotify.tokens())
             .await
             .unwrap();
-        let relinked = super::status(&db, user_id)
+        let relinked = super::status(&state, user_id)
             .await
             .unwrap()
             .authorized_at
@@ -530,10 +396,10 @@ mod tests {
         );
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
+    #[sqlx::test(migrations = false)]
     async fn concurrent_calls_refresh_once(db: PgPool) {
         let spotify = MockSpotify::start().await;
-        let state = spotify.state(db.clone());
+        let state = spotify.state(db.clone()).await;
         let user_id = linked_user(&spotify, &state).await;
         expire_soon(&db, user_id).await;
 
@@ -544,32 +410,32 @@ mod tests {
         let hashes = futures::future::join_all(calls).await;
         assert_eq!(spotify.mock.refreshes.load(Ordering::SeqCst), 1);
         for hash in hashes {
-            assert_eq!(hash.unwrap(), token_hash("access-2"));
+            assert_eq!(hash.unwrap(), Some(token_hash("access-2")));
         }
 
         // A forced refresh of a token already replaced reuses the new one.
         let stale = token_hash("access-1");
         let linked = refresh(&state, user_id, &stale).await.unwrap().unwrap();
-        assert_eq!(linked.token_hash, token_hash("access-2"));
+        assert_eq!(linked.token_hash, Some(token_hash("access-2")));
         assert_eq!(spotify.mock.refreshes.load(Ordering::SeqCst), 1);
         // Of the current one, refreshes.
         let current = token_hash("access-2");
         let linked = refresh(&state, user_id, &current).await.unwrap().unwrap();
-        assert_eq!(linked.token_hash, token_hash("access-3"));
+        assert_eq!(linked.token_hash, Some(token_hash("access-3")));
         assert_eq!(spotify.mock.refreshes.load(Ordering::SeqCst), 2);
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
+    #[sqlx::test(migrations = false)]
     async fn a_revoked_refresh_token_needs_a_relink(db: PgPool) {
         let spotify = MockSpotify::start().await;
-        let state = spotify.state(db.clone());
+        let state = spotify.state(db.clone()).await;
         let user_id = linked_user(&spotify, &state).await;
         expire_soon(&db, user_id).await;
         spotify.mock.invalid_grant.store(true, Ordering::SeqCst);
 
         assert!(account(&state, user_id).await.unwrap().is_none());
-        let status = status(&db, user_id).await.unwrap();
-        assert_eq!(status.status, Some(State::NeedsRelink));
+        let status = status(&state, user_id).await.unwrap();
+        assert_eq!(status.status, Some(LinkState::NeedsRelink));
         assert!(
             status
                 .last_error
@@ -586,14 +452,17 @@ mod tests {
             .await
             .unwrap();
         assert!(account(&state, user_id).await.unwrap().is_some());
-        assert_eq!(super::status(&db, user_id).await.unwrap().last_error, None);
+        assert_eq!(
+            super::status(&state, user_id).await.unwrap().last_error,
+            None
+        );
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
+    #[sqlx::test(migrations = false)]
     async fn other_refresh_failures_are_errors_and_leave_the_link_ok(db: PgPool) {
         // Nothing listens on the default mock URL.
         let spotify = MockSpotify::start().await;
-        let state = testing::state(db.clone());
+        let state = testing::state(db.clone()).await;
         let (user_id, _) = testing::sign_in(&state, 1).await;
         store_linked(&state, user_id, &spotify.tokens())
             .await
@@ -601,56 +470,28 @@ mod tests {
         expire_soon(&db, user_id).await;
 
         assert!(account(&state, user_id).await.is_err());
-        assert_eq!(status(&db, user_id).await.unwrap().status, Some(State::Ok));
+        assert_eq!(
+            status(&state, user_id).await.unwrap().status,
+            Some(LinkState::Ok)
+        );
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
+    #[sqlx::test(migrations = false)]
     async fn missing_scopes_make_the_link_unusable(db: PgPool) {
         let spotify = MockSpotify::start().await;
-        let state = spotify.state(db.clone());
+        let state = spotify.state(db.clone()).await;
         let (user_id, _) = testing::sign_in(&state, 1).await;
         let mut tokens = spotify.tokens();
         tokens.scope = "user-read-private".into();
         store_linked(&state, user_id, &tokens).await.unwrap();
 
         assert!(account(&state, user_id).await.unwrap().is_none());
-        let status = status(&db, user_id).await.unwrap();
+        let status = status(&state, user_id).await.unwrap();
         assert!(status.linked);
         assert!(
             status
                 .missing_scopes
                 .contains(&"user-modify-playback-state")
         );
-    }
-
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn mark_invalid_ignores_stale_tokens_and_mark_ok_is_throttled(db: PgPool) {
-        let spotify = MockSpotify::start().await;
-        let state = spotify.state(db.clone());
-        let user_id = linked_user(&spotify, &state).await;
-
-        mark_invalid(&db, user_id, &token_hash("an-older-token")).await;
-        assert_eq!(status(&db, user_id).await.unwrap().status, Some(State::Ok));
-
-        sqlx::query("UPDATE spotify_links SET last_ok_at = now() - interval '30 seconds'")
-            .execute(&db)
-            .await
-            .unwrap();
-        let before = status(&db, user_id).await.unwrap().last_ok_at;
-        mark_ok(&db, user_id).await;
-        assert_eq!(status(&db, user_id).await.unwrap().last_ok_at, before);
-        sqlx::query("UPDATE spotify_links SET last_ok_at = now() - interval '2 minutes'")
-            .execute(&db)
-            .await
-            .unwrap();
-        mark_ok(&db, user_id).await;
-        let after = status(&db, user_id).await.unwrap().last_ok_at.unwrap();
-        assert!(after > Utc::now() - TimeDelta::seconds(5));
-
-        mark_invalid(&db, user_id, &token_hash("access-1")).await;
-        let status = status(&db, user_id).await.unwrap();
-        assert_eq!(status.status, Some(State::NeedsRelink));
-        assert!(status.last_error.is_some());
-        assert!(account(&state, user_id).await.unwrap().is_none());
     }
 }

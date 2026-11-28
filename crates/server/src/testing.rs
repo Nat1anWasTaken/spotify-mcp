@@ -1,6 +1,6 @@
-//! Fixtures for tests that drive the HTTP app against a `#[sqlx::test]`
-//! database, and [`MockSpotify`], a stand-in for Spotify's accounts service
-//! and Web API.
+//! [`MockSpotify`], a stand-in for Spotify's accounts service and Web API,
+//! and the app state that talks to it. The framework's `testing` module has
+//! the rest.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -13,131 +13,34 @@ use std::{
 
 use axum::{
     Router,
-    body::{Body, to_bytes},
-    http::{HeaderMap, Request, StatusCode, header},
+    http::{HeaderMap, StatusCode, header},
 };
+use mcp_backbone::{App, AppState, testing};
 use serde_json::Value;
 use sqlx::PgPool;
-use tower::ServiceExt;
 
-use crate::{config::Config, state::AppState};
+pub use mcp_backbone::testing::{PUBLIC_URL, Response, dashboard_request, send, sign_in};
 
-pub const PUBLIC_URL: &str = "https://mcp.example.test";
+use crate::{config::SpotifyConfig, service::SpotifyService};
 
-pub fn state(db: PgPool) -> AppState {
-    state_with_spotify(db, "http://127.0.0.1:9")
-}
-
-/// Test state whose Spotify accounts and API hosts are both `spotify_url`
-/// (a mock server; the default points at a closed port).
-pub fn state_with_spotify(db: PgPool, spotify_url: &str) -> AppState {
-    let config = Arc::new(Config {
-        bind_addr: ([127, 0, 0, 1], 0).into(),
-        public_url: PUBLIC_URL.to_owned(),
-        database_url: String::new(),
-        spotify: spotify::Credentials {
+/// A migrated test database's app state whose Spotify accounts and API hosts
+/// are both `spotify_url` (a mock server; the default points at a closed
+/// port).
+pub async fn state_with_spotify(db: PgPool, spotify_url: &str) -> AppState<SpotifyService> {
+    testing::migrate(&db, None).await;
+    let config = SpotifyConfig {
+        credentials: spotify::Credentials {
             client_id: "spotify-client".to_owned(),
             client_secret: "spotify-secret".to_owned(),
         },
-        spotify_accounts_url: spotify_url.to_owned(),
-        spotify_api_url: spotify_url.to_owned(),
-        encryption_key: [0; 32],
-        web_dist: "/nonexistent".into(),
-    });
-    AppState::new(config, db).expect("test state")
+        accounts_url: spotify_url.to_owned(),
+        api_url: spotify_url.to_owned(),
+    };
+    testing::app_state(App::new(SpotifyService::new(&config)), db).await
 }
 
-pub struct Response {
-    pub status: StatusCode,
-    pub headers: HeaderMap,
-    pub body: Vec<u8>,
-}
-
-impl Response {
-    pub fn json(&self) -> Value {
-        serde_json::from_slice(&self.body).expect("JSON response body")
-    }
-
-    pub fn location(&self) -> &str {
-        self.headers[header::LOCATION]
-            .to_str()
-            .expect("ASCII Location")
-    }
-}
-
-pub async fn send(app: &Router, request: Request<Body>) -> Response {
-    let response = app
-        .clone()
-        .oneshot(request)
-        .await
-        .expect("infallible router");
-    let status = response.status();
-    let headers = response.headers().clone();
-    let body = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("readable body")
-        .to_vec();
-    Response {
-        status,
-        headers,
-        body,
-    }
-}
-
-/// A signed-in dashboard user; returns its ID and the `Cookie` header value.
-pub async fn sign_in(state: &AppState, n: i64) -> (uuid::Uuid, String) {
-    let user_id = sqlx::query_scalar("INSERT INTO users (spotify_id) VALUES ($1) RETURNING id")
-        .bind(format!("user{n}"))
-        .fetch_one(&state.db)
-        .await
-        .expect("insert user");
-    let cookie = crate::auth::start_session(&state.db, &state.config, user_id)
-        .await
-        .expect("start session");
-    (user_id, format!("{}={}", cookie.name(), cookie.value()))
-}
-
-/// An agent session for `user_id`, with a freshly inserted public client.
-pub async fn agent_session(state: &AppState, user_id: uuid::Uuid) -> uuid::Uuid {
-    let client_id = uuid::Uuid::new_v4().to_string();
-    sqlx::query(
-        "INSERT INTO oauth_clients (client_id, client_name, redirect_uris, grant_types, source)
-         VALUES ($1, 'Test Agent', ARRAY['https://agent.example/cb'], ARRAY['authorization_code'], 'dcr')",
-    )
-    .bind(&client_id)
-    .execute(&state.db)
-    .await
-    .expect("insert client");
-    sqlx::query_scalar(
-        "INSERT INTO agent_sessions (user_id, client_id, name) VALUES ($1, $2, 'Test Agent')
-         RETURNING id",
-    )
-    .bind(user_id)
-    .bind(&client_id)
-    .fetch_one(&state.db)
-    .await
-    .expect("insert agent session")
-}
-
-/// A JSON request from the dashboard, as the browser would send it.
-pub fn dashboard_request(
-    method: axum::http::Method,
-    uri: &str,
-    cookie: &str,
-    body: Option<&Value>,
-) -> Request<Body> {
-    let request = Request::builder()
-        .method(method)
-        .uri(uri)
-        .header(header::COOKIE, cookie)
-        .header(header::ORIGIN, PUBLIC_URL);
-    match body {
-        Some(body) => request
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(body.to_string())),
-        None => request.body(Body::empty()),
-    }
-    .expect("valid request")
+pub async fn state(db: PgPool) -> AppState<SpotifyService> {
+    state_with_spotify(db, "http://127.0.0.1:9").await
 }
 
 /// Spotify's accounts service (`POST /api/token`) and the Web API endpoints
@@ -217,8 +120,8 @@ impl MockSpotify {
     }
 
     /// Test state talking to this mock.
-    pub fn state(&self, db: PgPool) -> AppState {
-        state_with_spotify(db, &self.url)
+    pub async fn state(&self, db: PgPool) -> AppState<SpotifyService> {
+        state_with_spotify(db, &self.url).await
     }
 
     /// Fresh tokens the mock accepts, as an authorization code grant returns.

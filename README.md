@@ -54,7 +54,7 @@ Requirements: Rust (the pinned toolchain in `rust-toolchain.toml` installs
 itself), Node 22 with pnpm, Docker.
 
 ```sh
-docker compose -f docker-compose.dev.yml up -d   # Postgres on localhost:5444
+docker compose -f docker-compose.dev.yml up -d   # Postgres on localhost:5445
 cp .env.example .env                             # then fill it in, see below
 cargo run -p spotify-mcp                         # API + MCP on :8080, migrations run at startup
 cd web && pnpm install && pnpm dev               # dashboard on http://127.0.0.1:5173, proxies to :8080

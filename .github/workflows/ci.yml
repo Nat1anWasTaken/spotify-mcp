@@ -107,14 +107,7 @@ jobs:
       - uses: actions/checkout@v7
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace --locked --no-run
-      # The ignored Postgres tests expect the schema the server applies at startup.
-      - name: Apply migrations
-        run: |
-          for migration in migrations/*.sql; do
-            psql -v ON_ERROR_STOP=1 -q "$DATABASE_URL" -f "$migration"
-          done
-      - run: cargo test --workspace --locked -- --include-ignored
+      - run: cargo test --workspace --locked
 
   web:
     name: Web

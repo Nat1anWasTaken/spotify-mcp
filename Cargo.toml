@@ -9,6 +9,7 @@ license = "MIT"
 
 [workspace.dependencies]
 spotify = { path = "crates/spotify" }
+mcp-backbone = "0.1.2"
 
 # shared
 anyhow = "1"
